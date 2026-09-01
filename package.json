@@ -1,0 +1,27 @@
+{
+  "name": "scorecard-app",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer scorecard tracking PWA",
+  "main": "backend/src/server.js",
+  "scripts": {
+    "setup": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ..",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend:only": "cd backend && npm run dev",
+    "dev:frontend:only": "cd frontend && npm run dev",
+    "init": "cd backend && npm run init-db",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:backend": "cd backend && npm install --production",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "start": "node backend/src/server.js",
+    "docker:build": "docker build -t scorecard-app .",
+    "docker:run": "docker run -p 5000:5000 scorecard-app"
+  },
+  "keywords": ["scorecard", "game", "pwa", "react", "node"],
+  "author": "Graham",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.1"
+  }
+}

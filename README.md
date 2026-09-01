@@ -7,7 +7,7 @@ A modern Progressive Web App for tracking scores in real-time during games and c
 ### For Players
 - 🎮 **Join Games** - Enter a shareable game code to join
 - 📊 **Track Scores** - Edit your own scores with add/subtract interface
-- 📈 **Score History** - View your last 3 scores to correct mistakes
+- 📈 **Score History** - View your last 5 score entries (the amounts added/subtracted) to correct mistakes
 - 👥 **Live Leaderboard** - See real-time rankings of all players
 - 📱 **Progressive Web App** - Install on any device, works offline
 
@@ -235,27 +235,166 @@ Currently uses simple session-based authentication:
 
 Future: Consider JWT tokens or OAuth for production.
 
-## 📦 Deployment
+## 📦 Deployment (Docker server via GitHub)
 
-### Docker Production
+This is the full path for deploying to a Linux host that runs Docker, pulling
+the code straight from GitHub (`https://github.com/gmlogan/scorekeeper`).
+
+### How it runs
+
+A single container. The multi-stage `Dockerfile` builds the React frontend, then
+the Node/Express backend serves **both** the API and the built frontend on one
+port (`5000`). The SQLite schema is applied automatically on every start
+(`CREATE TABLE IF NOT EXISTS ...`), so there is no separate DB-init step. The
+database file is kept on the host via a bind mount so it survives rebuilds.
+
+### 1. Install prerequisites on the host
+
+**Docker Engine + Compose plugin** (Debian/Ubuntu):
+
 ```bash
-# Build
-docker build -t scorecard-app .
-
-# Run
-docker run -d \
-  -p 5000:5000 \
-  -e NODE_ENV=production \
-  -v /data/scorecard:/app/database \
-  scorecard-app
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"    # log out/in afterwards so `docker` works without sudo
+docker compose version             # verify the compose plugin is present
 ```
+
+**Git**:
+
+```bash
+sudo apt-get update && sudo apt-get install -y git      # Debian/Ubuntu
+# sudo dnf install -y git                                # Fedora/RHEL
+```
+
+### 2. Install the GitHub CLI (`gh`) on the host
+
+`gh` gives the server its own credentials to clone/pull the repo (works for
+private repos too) without putting your personal SSH key on the box.
+
+**Debian / Ubuntu** (official GitHub apt repo):
+
+```bash
+sudo mkdir -p -m 755 /etc/apt/keyrings
+wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y gh
+```
+
+**Fedora / RHEL / CentOS**:
+
+```bash
+sudo dnf install -y 'dnf-command(config-manager)'
+sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+sudo dnf install -y gh
+```
+
+**Arch**: `sudo pacman -S github-cli`
+
+**Any distro (no root / no package manager)** — grab the static binary:
+
+```bash
+GH_VER=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" -o /tmp/gh.tgz
+tar -xzf /tmp/gh.tgz -C /tmp
+sudo install "/tmp/gh_${GH_VER}_linux_amd64/bin/gh" /usr/local/bin/gh
+gh --version
+```
+
+### 3. Authenticate `gh` and wire it into git
+
+```bash
+gh auth login          # choose: GitHub.com → HTTPS → "Login with a web browser"
+                        #   (or paste a Personal Access Token with `repo` scope on a headless box)
+gh auth setup-git      # makes `git` use gh's token as its credential helper
+gh auth status         # confirm you're logged in
+```
+
+On a headless server, `gh auth login` prints a one-time code and a URL to open on
+any other device. Alternatively: `echo "$GITHUB_TOKEN" | gh auth login --with-token`.
+
+### 4. Clone and start
+
+```bash
+sudo mkdir -p /opt && cd /opt
+gh repo clone gmlogan/scorekeeper        # or: git clone https://github.com/gmlogan/scorekeeper.git
+cd scorekeeper
+
+# Point the app at your public URL (used for Socket.IO CORS) and keep the port on localhost
+# so your reverse proxy is the only thing exposed to the internet:
+#   docker-compose.yml → services.app.environment.FRONTEND_URL = https://scores.example.com
+#   docker-compose.yml → services.app.ports = ["127.0.0.1:5000:5000"]
+
+docker compose up -d --build            # only starts the `app` service; dev services are behind `--profile dev`
+docker compose logs -f app              # expect "Database connected" then "Server running on port 5000"
+curl -s localhost:5000/health           # {"status":"ok"}
+```
+
+### 5. Reverse proxy + HTTPS
+
+Socket.IO needs WebSocket upgrade headers. **Caddy** (automatic TLS):
+
+```
+scores.example.com {
+    reverse_proxy 127.0.0.1:5000
+}
+```
+
+**nginx**:
+
+```nginx
+server {
+    server_name scores.example.com;
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### 6. Updating the deployment
+
+```bash
+cd /opt/scorekeeper
+git pull
+docker compose up -d --build
+docker image prune -f          # optional: clean up old layers
+```
+
+### 7. Data & backups
+
+- The SQLite DB lives on the host at `./backend/database/scorecard.db` (bind mount
+  from `docker-compose.yml`). It persists across `up`/`down`/`--build`.
+- Back up: `cp backend/database/scorecard.db backups/scorecard-$(date +%F).db`
+  (or `sqlite3 backend/database/scorecard.db ".backup 'backups/db.sqlite'"` for a
+  consistent copy while running).
+- Reset everything: `docker compose down && rm backend/database/scorecard.db && docker compose up -d`.
 
 ### Environment Variables
-```
-NODE_ENV=production
-PORT=5000
-FRONTEND_URL=http://yourdomain.com
-```
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `NODE_ENV` | `production` | Set by `docker-compose.yml`. |
+| `PORT` | `5000` | Container listen port. |
+| `FRONTEND_URL` | `http://localhost:5173` | Allowed origin for Socket.IO CORS. Set to your public URL. |
+
+The frontend is built for **same-origin** (`frontend/.env.production` has empty
+`VITE_API_URL` / `VITE_WS_URL`), so it talks to whatever host serves it — no
+rebuild needed per domain.
+
+### Caveats
+
+- Single container + single SQLite file: do **not** scale to multiple replicas —
+  each would get its own DB and Socket.IO rooms wouldn't be shared.
+- Auth is still just a client-set `x-user-id` header (see [Authentication](#-authentication));
+  tighten this before relying on owner-only score editing on a public host.
 
 ## 🧪 Testing
 

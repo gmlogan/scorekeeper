@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../hooks/useGame';
 
 // Simple UUID generator
 const generateUUID = () => {
@@ -24,9 +24,10 @@ export const Home = () => {
       const userId = generateUUID();
       const sessionToken = 'token_' + userId;
 
-      // Create user in backend
-      const response = await axios.post(
-        'http://localhost:5000/api/users',
+      // Create user in backend (same origin; headers are explicit because
+      // localStorage has no userId yet on first run)
+      const response = await api.post(
+        '/users',
         { username: username.trim() },
         {
           headers: {

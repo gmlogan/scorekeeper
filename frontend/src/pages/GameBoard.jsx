@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../context/GameContext';
+import { copyText } from '../lib/clipboard';
 
 // SQLite timestamps are UTC "YYYY-MM-DD HH:MM:SS"
 const formatEntryTime = (value) => {
@@ -160,7 +161,7 @@ export const GameBoard = () => {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-gray-500">Code: {gameData?.code}</span>
           <button
-            onClick={() => navigator.clipboard.writeText(gameData?.code)}
+            onClick={() => copyText(gameData?.code)}
             className="text-xs text-primary hover:text-primary-dark"
           >
             Copy

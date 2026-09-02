@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
+import { copyText } from '../lib/clipboard';
 
 export const CreateGame = () => {
   const navigate = useNavigate();
@@ -49,9 +50,9 @@ export const CreateGame = () => {
     }
   };
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(gameCode);
-    alert('Code copied to clipboard!');
+  const copyCode = async () => {
+    const ok = await copyText(gameCode);
+    alert(ok ? 'Code copied to clipboard!' : `Copy failed — game code is ${gameCode}`);
   };
 
   const shareCode = () => {

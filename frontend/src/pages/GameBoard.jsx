@@ -180,22 +180,29 @@ export const GameBoard = () => {
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
-      <div className="bg-white px-6 py-6 shadow-sm sticky top-0">
-        <button
-          onClick={() => navigate('/')}
-          className="mb-4 p-2 bg-gray-100 rounded-full inline-block"
-        >
-          ←
-        </button>
-        <h1 className="text-2xl font-bold mb-1">{gameData?.name}</h1>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-500">Code: {gameData?.code}</span>
+      <div className="bg-white px-4 py-3 shadow-sm sticky top-0 z-10">
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => copyText(gameData?.code)}
-            className="text-xs text-primary hover:text-primary-dark"
+            onClick={() => navigate('/games')}
+            aria-label="Back to active games"
+            className="shrink-0 w-9 h-9 flex items-center justify-center bg-gray-100 rounded-full text-lg leading-none hover:bg-gray-200 transition-colors"
           >
-            Copy
+            ←
           </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold leading-tight truncate">
+              {gameData?.name}
+            </h1>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <span className="font-semibold">Code: {gameData?.code}</span>
+              <button
+                onClick={() => copyText(gameData?.code)}
+                className="font-semibold text-primary hover:text-primary-dark"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

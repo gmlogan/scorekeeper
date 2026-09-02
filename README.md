@@ -324,11 +324,11 @@ cd scorekeeper
 
 # Point the app at your public URL (used for Socket.IO CORS) and keep the port on localhost
 # so your reverse proxy is the only thing exposed to the internet:
-#   docker-compose.yml → services.app.environment.FRONTEND_URL = https://scores.example.com
-#   docker-compose.yml → services.app.ports = ["127.0.0.1:5000:5000"]
+#   docker-compose.yml → services.scorekeeper.environment.FRONTEND_URL = https://scores.example.com
+#   docker-compose.yml → services.scorekeeper.ports = ["127.0.0.1:5000:5000"]
 
-docker compose up -d --build            # only starts the `app` service; dev services are behind `--profile dev`
-docker compose logs -f app              # expect "Database connected" then "Server running on port 5000"
+docker compose up -d --build            # only starts the `scorekeeper` service; dev services are behind `--profile dev`
+docker compose logs -f scorekeeper      # expect "Database connected" then "Server running on port 5000"
 curl -s localhost:5000/health           # {"status":"ok"}
 ```
 

@@ -350,7 +350,7 @@ export const GameBoard = () => {
         {/* Host Controls — only the game creator sees these */}
         {isHost && (
           <div className="card border-2 border-primary border-opacity-50">
-            <h2 className="text-lg font-bold mb-4">Host Controls</h2>
+            <h2 className="text-lg font-bold mb-3">Host Controls</h2>
 
             {isFinished ? (
               <>
@@ -365,29 +365,20 @@ export const GameBoard = () => {
                 </button>
               </>
             ) : (
-              <>
-                {isPaused ? (
-                  <button
-                    onClick={() => changeStatus('active')}
-                    className="btn-secondary w-full mb-2"
-                  >
-                    ▶ Resume Game
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => changeStatus('paused')}
-                    className="btn-secondary w-full mb-2"
-                  >
-                    ⏸ Pause Game
-                  </button>
-                )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => changeStatus(isPaused ? 'active' : 'paused')}
+                  className="btn-secondary flex-1 py-2"
+                >
+                  {isPaused ? '▶ Resume' : '⏸ Pause'}
+                </button>
                 <button
                   onClick={() => changeStatus('finished')}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-full transition-all"
+                  className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full transition-all"
                 >
-                  🔚 End Game
+                  ⏹ Stop
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}

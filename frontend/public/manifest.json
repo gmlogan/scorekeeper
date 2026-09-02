@@ -10,6 +10,12 @@
   "scope": "/",
   "icons": [
     {
+      "src": "/scorekeeper.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
       "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
@@ -22,28 +28,10 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-maskable-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icon-maskable-512.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/screenshot-540.png",
-      "sizes": "540x720",
-      "type": "image/png"
-    },
-    {
-      "src": "/screenshot-1080.png",
-      "sizes": "1080x1440",
-      "type": "image/png"
     }
   ],
   "categories": ["games", "lifestyle"],
@@ -56,7 +44,8 @@
       "icons": [
         {
           "src": "/icon-96.png",
-          "sizes": "96x96"
+          "sizes": "96x96",
+          "type": "image/png"
         }
       ]
     },
@@ -68,7 +57,8 @@
       "icons": [
         {
           "src": "/icon-96.png",
-          "sizes": "96x96"
+          "sizes": "96x96",
+          "type": "image/png"
         }
       ]
     }

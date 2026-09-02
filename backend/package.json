@@ -1,7 +1,7 @@
 {
-  "name": "scorecard-backend",
+  "name": "scorekeeper-backend",
   "version": "1.0.0",
-  "description": "Scorecard app backend",
+  "description": "Scorekeeper app backend",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",

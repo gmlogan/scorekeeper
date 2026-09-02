@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const dbDir = __dirname;
-const dbPath = path.join(dbDir, 'scorecard.db');
+const dbPath = path.join(dbDir, 'scorekeeper.db');
 const schemaPath = path.join(dbDir, 'schema.sql');
 
 // Ensure database directory exists

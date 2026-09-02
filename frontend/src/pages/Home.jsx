@@ -56,7 +56,7 @@ export const Home = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 pb-24">
         <div className="card max-w-md w-full">
-          <h1 className="text-2xl font-bold mb-2">Welcome to Scorecard</h1>
+          <h1 className="text-2xl font-bold mb-2">Welcome to Scorekeeper</h1>
           <p className="text-gray-600 mb-6">Enter your name to get started</p>
           <input
             type="text"

@@ -1,7 +1,7 @@
 {
-  "name": "Scorecard - Keep Every Point Counted",
-  "short_name": "Scorecard",
-  "description": "Real-time multiplayer scorecard tracking app for games and competitions",
+  "name": "Scorekeeper - Keep Every Point Counted",
+  "short_name": "Scorekeeper",
+  "description": "Real-time multiplayer score-tracking app for games and competitions",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

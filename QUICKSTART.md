@@ -1,4 +1,4 @@
-# 🚀 Quick Start Guide - Scorecard App
+# 🚀 Quick Start Guide - Scorekeeper
 
 ## Option 1: Docker (Easiest - Recommended)
 
@@ -8,15 +8,15 @@
 
 ### Run Production Build
 ```bash
-cd /Users/graham/Dev/JS/scorecard-claude
+cd scorekeeper
 
 # Build the Docker image
-docker build -t scorecard-app .
+docker build -t scorekeeper .
 
 # Run the container
 docker run -p 5000:5000 \
   -v $(pwd)/backend/database:/app/database \
-  scorecard-app
+  scorekeeper
 ```
 
 Then open: **http://localhost:5000**
@@ -27,7 +27,7 @@ Then open: **http://localhost:5000**
 
 ### Terminal 1 - Backend
 ```bash
-cd /Users/graham/Dev/JS/scorecard-claude/backend
+cd scorekeeper/backend
 
 # Install dependencies
 npm install
@@ -42,7 +42,7 @@ npm run dev
 
 ### Terminal 2 - Frontend
 ```bash
-cd /Users/graham/Dev/JS/scorecard-claude/frontend
+cd scorekeeper/frontend
 
 # Install dependencies
 npm install
@@ -97,7 +97,7 @@ Backend API is proxied from the Vite dev server.
 ### Database errors
 ```bash
 # Reset database
-rm backend/database/scorecard.db
+rm backend/database/scorekeeper.db
 npm run init-db  # (from backend directory)
 ```
 
@@ -114,7 +114,7 @@ npm run dev -- --port 5174  # Frontend
 ## File Structure Overview
 
 ```
-scorecard-claude/
+scorekeeper/
 ├── backend/              # Express API + WebSocket
 │   ├── src/server.js     # Main server
 │   └── database/         # SQLite files

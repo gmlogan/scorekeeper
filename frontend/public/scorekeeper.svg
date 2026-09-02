@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Scorekeeper">
+  <defs>
+    <linearGradient id="sk-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFA25C"/>
+      <stop offset="1" stop-color="#FF6B1A"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#sk-bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round">
+    <line x1="78" y1="80" x2="78" y2="176"/>
+    <line x1="111" y1="80" x2="111" y2="176"/>
+    <line x1="144" y1="80" x2="144" y2="176"/>
+    <line x1="177" y1="80" x2="177" y2="176"/>
+    <line x1="68" y1="182" x2="188" y2="74"/>
+  </g>
+</svg>

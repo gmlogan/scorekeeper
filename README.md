@@ -1,4 +1,4 @@
-# 🎯 Scorecard App - Real-Time Multiplayer Score Tracking PWA
+# 🎯 Scorekeeper - Real-Time Multiplayer Score Tracking PWA
 
 A modern Progressive Web App for tracking scores in real-time during games and competitions. Built with React, Node.js, and SQLite, deployed via Docker.
 
@@ -53,10 +53,10 @@ A modern Progressive Web App for tracking scores in real-time during games and c
 
 ```bash
 # Build the image
-docker build -t scorecard-app .
+docker build -t scorekeeper .
 
 # Run the container
-docker run -p 5000:5000 scorecard-app
+docker run -p 5000:5000 scorekeeper
 ```
 
 Open http://localhost:5000 in your browser.
@@ -99,7 +99,7 @@ docker-compose --profile dev up
 ## 🏗️ Project Structure
 
 ```
-scorecard-claude/
+scorekeeper/
 ├── backend/
 │   ├── src/
 │   │   ├── server.js              # Express + Socket.io server
@@ -370,12 +370,12 @@ docker image prune -f          # optional: clean up old layers
 
 ### 7. Data & backups
 
-- The SQLite DB lives on the host at `./backend/database/scorecard.db` (bind mount
+- The SQLite DB lives on the host at `./backend/database/scorekeeper.db` (bind mount
   from `docker-compose.yml`). It persists across `up`/`down`/`--build`.
-- Back up: `cp backend/database/scorecard.db backups/scorecard-$(date +%F).db`
-  (or `sqlite3 backend/database/scorecard.db ".backup 'backups/db.sqlite'"` for a
+- Back up: `cp backend/database/scorekeeper.db backups/scorekeeper-$(date +%F).db`
+  (or `sqlite3 backend/database/scorekeeper.db ".backup 'backups/db.sqlite'"` for a
   consistent copy while running).
-- Reset everything: `docker compose down && rm backend/database/scorecard.db && docker compose up -d`.
+- Reset everything: `docker compose down && rm backend/database/scorekeeper.db && docker compose up -d`.
 
 ### Environment Variables
 

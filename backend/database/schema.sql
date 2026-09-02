@@ -1,4 +1,4 @@
--- Database schema for Scorecard App
+-- Database schema for Scorekeeper App
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scorecard-v1';
+const CACHE_NAME = 'scorekeeper-v1';
 const urlsToCache = [
   '/',
   '/index.html',

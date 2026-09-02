@@ -1,7 +1,7 @@
 {
-  "name": "scorecard-frontend",
+  "name": "scorekeeper-frontend",
   "version": "1.0.0",
-  "description": "Scorecard app PWA frontend",
+  "description": "Scorekeeper app PWA frontend",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",

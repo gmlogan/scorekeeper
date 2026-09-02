@@ -1,7 +1,7 @@
-# Scorecard App - Project Plan
+# Scorekeeper - Project Plan
 
 ## Overview
-A real-time multiplayer scorecard tracking application built as a PWA with React frontend and Node.js/SQLite backend, deployable via Docker.
+A real-time multiplayer score-tracking application built as a PWA with React frontend and Node.js/SQLite backend, deployable via Docker.
 
 ## Core Features
 
@@ -105,7 +105,7 @@ A real-time multiplayer scorecard tracking application built as a PWA with React
 ## Project Structure
 
 ```
-scorecard-claude/
+scorekeeper/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/

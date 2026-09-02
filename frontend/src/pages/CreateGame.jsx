@@ -56,10 +56,10 @@ export const CreateGame = () => {
   };
 
   const shareCode = () => {
-    const text = `Join my game on Scorecard! Code: ${gameCode}`;
+    const text = `Join my game on Scorekeeper! Code: ${gameCode}`;
     if (navigator.share) {
       navigator.share({
-        title: 'Scorecard Game',
+        title: 'Scorekeeper Game',
         text: text,
       });
     } else {

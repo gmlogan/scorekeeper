@@ -205,6 +205,19 @@ export const useGameAPI = () => {
     }
   }, [setError]);
 
+  const updateGameStatus = useCallback(
+    async (gameId, status) => {
+      try {
+        const response = await api.patch(`/games/${gameId}/status`, { status });
+        return response.data;
+      } catch (error) {
+        setError(error.response?.data?.error || 'Failed to update game');
+        throw error;
+      }
+    },
+    [setError]
+  );
+
   const updateDisplayName = useCallback(async (displayName) => {
     try {
       const response = await api.patch('/users/me', { displayName });
@@ -227,6 +240,7 @@ export const useGameAPI = () => {
     getUserGames,
     getHostedGames,
     deleteHostedGames,
+    updateGameStatus,
     updateDisplayName,
   };
 };

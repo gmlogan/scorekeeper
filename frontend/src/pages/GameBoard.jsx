@@ -16,8 +16,8 @@ const formatEntryTime = (value) => {
 export const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
-  const { getGame, updateScore, getLeaderboard, getScoreHistory } = useGameAPI();
-  const { joinGame, on, emitScoreUpdate } = useWebSocket();
+  const { getGame, updateScore, getScoreHistory, updateGameStatus } = useGameAPI();
+  const { joinGame, on, emitScoreUpdate, emitGameStateChange } = useWebSocket();
   const { state, updatePlayerScore: updatePlayerScoreContext } = useGame();
   const [players, setPlayers] = useState([]);
   const [gameData, setGameData] = useState(null);
@@ -86,9 +86,14 @@ export const GameBoard = () => {
       refreshGame();
     });
 
+    const unsubState = on('game-state-changed', (data) => {
+      setGameData((prev) => (prev ? { ...prev, status: data.status } : prev));
+    });
+
     return () => {
       unsubScore();
       unsubPlayerJoined();
+      unsubState();
     };
   }, [gameId]);
 
@@ -101,7 +106,13 @@ export const GameBoard = () => {
     }
   }, [selectedPlayer?.player_id]);
 
+  const status = gameData?.status || 'active';
+  const isPaused = status === 'paused';
+  const isFinished = status === 'finished';
+  const isLocked = isPaused || isFinished;
+
   const applyDelta = (sign) => {
+    if (isLocked) return;
     const parsed = parseInt(scoreInput, 10);
     const magnitude = Number.isNaN(parsed) ? 1 : Math.abs(parsed);
     handleScoreChange(sign * magnitude);
@@ -110,7 +121,7 @@ export const GameBoard = () => {
   };
 
   const handleScoreChange = async (amount) => {
-    if (!selectedPlayer) return;
+    if (!selectedPlayer || isLocked) return;
 
     try {
       const result = await updateScore(gameId, selectedPlayer.player_id, amount);
@@ -138,6 +149,25 @@ export const GameBoard = () => {
 
   const isHost = gameData?.host_id === userId;
   const isOwnScore = selectedPlayer?.player_id === userId;
+
+  const changeStatus = async (next) => {
+    const prompts = {
+      paused:
+        'Pause the game for everyone? Players will not be able to change scores until you resume.',
+      finished:
+        'End the game for everyone? Final scores will be locked and this cannot be undone.',
+    };
+    if (prompts[next] && !window.confirm(prompts[next])) return;
+
+    try {
+      const updated = await updateGameStatus(gameId, next);
+      setGameData((prev) => ({ ...(prev || {}), ...updated }));
+      emitGameStateChange(gameId, next); // tell everyone else in the room
+    } catch (error) {
+      console.error('Failed to update game status:', error);
+      alert(error.response?.data?.error || 'Failed to update the game');
+    }
+  };
 
   if (loading) {
     return (
@@ -168,6 +198,21 @@ export const GameBoard = () => {
           </button>
         </div>
       </div>
+
+      {/* Game state banner — shown to everyone */}
+      {isLocked && (
+        <div
+          className={`px-6 py-3 text-center text-sm font-semibold ${
+            isFinished
+              ? 'bg-gray-900 text-white'
+              : 'bg-yellow-100 text-yellow-800'
+          }`}
+        >
+          {isFinished
+            ? '🔚 This game has ended — final scores are locked'
+            : '⏸ Game paused by the host — scoring is locked'}
+        </div>
+      )}
 
       <div className="px-6 py-6 max-w-2xl mx-auto space-y-6">
         {/* Leaderboard */}
@@ -227,8 +272,8 @@ export const GameBoard = () => {
               </p>
             </div>
 
-            {/* Score adjustment — only the owner of this score can add/subtract */}
-            {isOwnScore && (
+            {/* Score adjustment — only the owner of this score, and only while the game is active */}
+            {isOwnScore && !isLocked && (
               <div className="flex gap-2">
                 <button
                   onClick={() => applyDelta(-1)}
@@ -250,6 +295,13 @@ export const GameBoard = () => {
                   +
                 </button>
               </div>
+            )}
+            {isOwnScore && isLocked && (
+              <p className="text-sm text-gray-500 bg-gray-100 rounded-xl px-4 py-3 text-center">
+                {isFinished
+                  ? 'The game has ended. Scores can no longer be changed.'
+                  : 'The game is paused. You can change scores again once the host resumes.'}
+              </p>
             )}
 
             {/* Last 5 score entries (the amount added/subtracted, not the total) */}
@@ -288,16 +340,48 @@ export const GameBoard = () => {
           </div>
         )}
 
-        {/* Host Controls */}
+        {/* Host Controls — only the game creator sees these */}
         {isHost && (
           <div className="card border-2 border-primary border-opacity-50">
             <h2 className="text-lg font-bold mb-4">Host Controls</h2>
-            <button className="btn-secondary w-full mb-2">
-              ⏸ Pause Game
-            </button>
-            <button className="btn-secondary w-full">
-              🔚 End Game
-            </button>
+
+            {isFinished ? (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  This game has ended. Final scores are locked for everyone.
+                </p>
+                <button
+                  onClick={() => navigate('/')}
+                  className="btn-secondary w-full"
+                >
+                  Back to home
+                </button>
+              </>
+            ) : (
+              <>
+                {isPaused ? (
+                  <button
+                    onClick={() => changeStatus('active')}
+                    className="btn-secondary w-full mb-2"
+                  >
+                    ▶ Resume Game
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => changeStatus('paused')}
+                    className="btn-secondary w-full mb-2"
+                  >
+                    ⏸ Pause Game
+                  </button>
+                )}
+                <button
+                  onClick={() => changeStatus('finished')}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-full transition-all"
+                >
+                  🔚 End Game
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

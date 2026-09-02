@@ -18,6 +18,15 @@ class ScoreController {
         return res.status(404).json({ error: 'Game not found' });
       }
 
+      if (game.status !== 'active') {
+        return res.status(409).json({
+          error:
+            game.status === 'paused'
+              ? 'Game is paused by the host'
+              : 'Game has ended',
+        });
+      }
+
       // Check if user is host or the player themselves
       const isHost = game.host_id === userId;
       const isOwnScore = playerId === userId;
@@ -81,6 +90,15 @@ class ScoreController {
       const game = await this.db.getGameById(gameId);
       if (!game) {
         return res.status(404).json({ error: 'Game not found' });
+      }
+
+      if (game.status !== 'active') {
+        return res.status(409).json({
+          error:
+            game.status === 'paused'
+              ? 'Game is paused by the host'
+              : 'Game has ended',
+        });
       }
 
       // Check if user is host or the player themselves

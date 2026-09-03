@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -19,9 +21,23 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(cors());
+app.use(helmet());
+// FRONTEND_URL unset (dev, or same-origin prod deploys where the backend
+// serves the built frontend) means there's no separate origin to restrict to.
+app.use(cors(process.env.FRONTEND_URL ? { origin: process.env.FRONTEND_URL } : {}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// Unauthenticated endpoints (account creation, public game lookup) are the
+// only ones an attacker can hit without a token, so they're what a script
+// could hammer to exhaust disk (unbounded user/game rows) or brute-force
+// the game-code space. 30 req/min/IP is generous for real usage.
+const publicEndpointLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Database
 const db = new Database();
@@ -47,12 +63,13 @@ hub.attach(wss);
 const onGameChanged = (gameId) => hub.reloadAndBroadcast(gameId);
 
 // Routes
+app.use('/api/games/code', publicEndpointLimiter); // unauthenticated code lookup
 app.use('/api/games', gameRoutes(db, onGameChanged));
 app.use('/api/scores', scoreRoutes(db, onGameChanged));
 
 // Registration: mint a fresh anonymous identity + session token. The token is
 // returned once here and never again; only its hash is stored.
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', publicEndpointLimiter, async (req, res) => {
   try {
     const username = (req.body.username || '').trim();
     if (username.length < 2) {

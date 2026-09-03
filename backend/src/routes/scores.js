@@ -2,9 +2,9 @@ const express = require('express');
 const ScoreController = require('../controllers/scoreController');
 const { auth } = require('../middleware/auth');
 
-module.exports = (db) => {
+module.exports = (db, onScoreUpdated) => {
   const router = express.Router();
-  const scoreController = new ScoreController(db);
+  const scoreController = new ScoreController(db, onScoreUpdated);
 
   // Update score (add/subtract)
   router.post('/games/:gameId/players/:playerId/update', auth, (req, res) =>

@@ -14,14 +14,29 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "cd backend && npm install --production",
     "build:frontend": "cd frontend && npm install && npm run build",
+    "test": "npm run test:api && npm run test:e2e",
+    "test:api": "vitest run tests/api",
+    "test:e2e": "playwright test",
     "start": "node backend/src/server.js",
     "docker:build": "docker build -t scorekeeper .",
     "docker:run": "docker run -p 5000:5000 scorekeeper"
   },
-  "keywords": ["scorekeeper", "scoreboard", "game", "pwa", "react", "node"],
+  "keywords": [
+    "scorekeeper",
+    "scoreboard",
+    "game",
+    "pwa",
+    "react",
+    "node"
+  ],
   "author": "Graham",
   "license": "MIT",
   "devDependencies": {
-    "concurrently": "^8.2.1"
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "concurrently": "^8.2.1",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.11"
   }
 }

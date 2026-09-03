@@ -27,18 +27,8 @@ export const useWebSocket = () => {
     socketRef.current?.emit('leave-game', { gameId, userId });
   }, []);
 
-  const emitScoreUpdate = useCallback((gameId, playerId, newScore, changeAmount, editedBy) => {
-    socketRef.current?.emit('score-updated', {
-      gameId,
-      playerId,
-      newScore,
-      changeAmount,
-      editedBy,
-    });
-  }, []);
-
-  const emitGameStateChange = useCallback((gameId, status) => {
-    socketRef.current?.emit('game-state-changed', { gameId, status });
+  const emitGameStateChange = useCallback((gameId, status, userId) => {
+    socketRef.current?.emit('game-state-changed', { gameId, status, userId });
   }, []);
 
   const on = useCallback((event, callback) => {
@@ -52,7 +42,6 @@ export const useWebSocket = () => {
     socket: socketRef.current,
     joinGame,
     leaveGame,
-    emitScoreUpdate,
     emitGameStateChange,
     on,
     isConnected: socketRef.current?.connected || false,

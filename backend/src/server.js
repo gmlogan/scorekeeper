@@ -29,16 +29,52 @@ const db = new Database();
 
 // Store active connections
 const gameConnections = {};
+const pendingScoreUpdates = new Map();
+const SCORE_BROADCAST_INTERVAL = 2000;
+
+const broadcastScoreUpdate = (gameId, update) => {
+  const pending = pendingScoreUpdates.get(gameId) || new Map();
+  pending.set(update.playerId, update);
+  pendingScoreUpdates.set(gameId, pending);
+
+  if (pending.timer) return;
+  pending.timer = setTimeout(() => {
+    const updates = Array.from(pending.entries())
+      .filter(([key]) => key !== 'timer')
+      .map(([, value]) => value);
+    pendingScoreUpdates.delete(gameId);
+    io.to(`game-${gameId}`).emit('scores-updated', {
+      updates,
+      timestamp: new Date(),
+    });
+  }, SCORE_BROADCAST_INTERVAL);
+};
 
 // WebSocket handlers
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
   // Join game room
-  socket.on('join-game', (data) => {
+  socket.on('join-game', async (data) => {
     const { gameId, userId } = data;
+    if (!gameId || !userId) {
+      return socket.emit('error', { message: 'Missing gameId or userId' });
+    }
+
+    const game = await db.getGameById(gameId);
+    if (!game) {
+      return socket.emit('error', { message: 'Game not found' });
+    }
+
+    const players = await db.getGamePlayers(gameId);
+    const isMember = players.some((player) => player.player_id === userId) || game.host_id === userId;
+    if (!isMember) {
+      return socket.emit('error', { message: 'Not authorized to join this game' });
+    }
+
     const room = `game-${gameId}`;
     socket.join(room);
+    socket.data.userId = userId;
 
     if (!gameConnections[gameId]) {
       gameConnections[gameId] = [];
@@ -52,23 +88,18 @@ io.on('connection', (socket) => {
     console.log(`User ${userId} joined game ${gameId}`);
   });
 
-  // Score updated
-  socket.on('score-updated', (data) => {
-    const { gameId, playerId, newScore, changeAmount, editedBy } = data;
-    const room = `game-${gameId}`;
-    // Sender already updated its own UI; notify only the others
-    socket.to(room).emit('score-updated', {
-      playerId,
-      newScore,
-      changeAmount,
-      editedBy,
-      timestamp: new Date()
-    });
-  });
-
   // Game state changed
-  socket.on('game-state-changed', (data) => {
-    const { gameId, status } = data;
+  socket.on('game-state-changed', async (data) => {
+    const { gameId, status, userId } = data;
+    if (!gameId || !status || !userId) {
+      return socket.emit('error', { message: 'Missing gameId, status, or userId' });
+    }
+
+    const game = await db.getGameById(gameId);
+    if (!game || game.host_id !== userId) {
+      return socket.emit('error', { message: 'Only the host can change game state' });
+    }
+
     const room = `game-${gameId}`;
     io.to(room).emit('game-state-changed', { status, timestamp: new Date() });
   });
@@ -82,6 +113,7 @@ io.on('connection', (socket) => {
       gameConnections[gameId] = gameConnections[gameId].filter(
         (conn) => conn.socketId !== socket.id
       );
+      if (gameConnections[gameId].length === 0) delete gameConnections[gameId];
     }
 
     io.to(room).emit('player-left', { userId });
@@ -94,16 +126,20 @@ io.on('connection', (socket) => {
 
     // Clean up connections
     Object.keys(gameConnections).forEach((gameId) => {
+      const connection = gameConnections[gameId].find((conn) => conn.socketId === socket.id);
+      if (!connection) return;
       gameConnections[gameId] = gameConnections[gameId].filter(
         (conn) => conn.socketId !== socket.id
       );
+      socket.to(`game-${gameId}`).emit('player-left', { userId: connection.userId });
+      if (gameConnections[gameId].length === 0) delete gameConnections[gameId];
     });
   });
 });
 
 // Routes
 app.use('/api/games', gameRoutes(db));
-app.use('/api/scores', scoreRoutes(db));
+app.use('/api/scores', scoreRoutes(db, broadcastScoreUpdate));
 
 // User creation endpoint
 app.post('/api/users', async (req, res) => {
@@ -182,10 +218,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
 const PORT = process.env.PORT || 5000;
 
-(async () => {
+const startServer = async () => {
   try {
     await db.connect();
     console.log('Database connected');
@@ -197,7 +232,7 @@ const PORT = process.env.PORT || 5000;
     console.error('Failed to start server:', error);
     process.exit(1);
   }
-})();
+};
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
@@ -207,3 +242,9 @@ process.on('SIGTERM', async () => {
     process.exit(0);
   });
 });
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, db, server, startServer };

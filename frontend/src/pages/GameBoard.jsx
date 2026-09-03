@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useGame } from '../context/GameContext';
 import { copyText } from '../lib/clipboard';
 
 // SQLite timestamps are UTC "YYYY-MM-DD HH:MM:SS"
@@ -17,8 +16,7 @@ export const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const { getGame, updateScore, getScoreHistory, updateGameStatus } = useGameAPI();
-  const { joinGame, on, emitScoreUpdate, emitGameStateChange } = useWebSocket();
-  const { state, updatePlayerScore: updatePlayerScoreContext } = useGame();
+  const { joinGame, leaveGame, on, emitGameStateChange } = useWebSocket();
   const [players, setPlayers] = useState([]);
   const [gameData, setGameData] = useState(null);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -27,6 +25,7 @@ export const GameBoard = () => {
   const [loading, setLoading] = useState(true);
   const userId = localStorage.getItem('userId');
   const selectedPlayerIdRef = useRef(null);
+  const scoreRequestIdRef = useRef(0);
 
   useEffect(() => {
     selectedPlayerIdRef.current = selectedPlayer?.player_id ?? null;
@@ -34,12 +33,16 @@ export const GameBoard = () => {
 
   const loadHistory = async (playerId) => {
     try {
+      if (selectedPlayerIdRef.current !== playerId) return;
       const rows = await getScoreHistory(gameId, playerId);
+      if (selectedPlayerIdRef.current !== playerId) return;
       // Most recent first; keep the last 5 entries only
       setHistory((rows || []).slice(0, 5));
     } catch (error) {
       console.error('Failed to load score history:', error);
-      setHistory([]);
+      if (selectedPlayerIdRef.current === playerId) {
+        setHistory([]);
+      }
     }
   };
 
@@ -62,21 +65,23 @@ export const GameBoard = () => {
     joinGame(gameId, userId); // join the socket room once, on mount
 
     // Set up WebSocket listeners
-    const unsubScore = on('score-updated', (data) => {
-      setPlayers((prev) =>
-        prev.map((p) =>
-          p.player_id === data.playerId
-            ? { ...p, current_score: data.newScore }
-            : p
-        )
+    const unsubScore = on('scores-updated', ({ updates }) => {
+      const ownUpdates = new Set(
+        updates.filter((update) => update.editedBy === userId).map((update) => update.playerId)
       );
-      setSelectedPlayer((prev) =>
-        prev && prev.player_id === data.playerId
-          ? { ...prev, current_score: data.newScore }
-          : prev
-      );
-      if (selectedPlayerIdRef.current === data.playerId) {
-        loadHistory(data.playerId);
+      setPlayers((prev) => prev.map((player) => {
+        const update = updates.find((entry) => entry.playerId === player.player_id);
+        return update && !ownUpdates.has(player.player_id)
+          ? { ...player, current_score: update.newScore }
+          : player;
+      }));
+      setSelectedPlayer((prev) => {
+        if (!prev || ownUpdates.has(prev.player_id)) return prev;
+        const update = updates.find((entry) => entry.playerId === prev.player_id);
+        return update ? { ...prev, current_score: update.newScore } : prev;
+      });
+      if (selectedPlayerIdRef.current && !ownUpdates.has(selectedPlayerIdRef.current)) {
+        loadHistory(selectedPlayerIdRef.current);
       }
     });
 
@@ -94,6 +99,7 @@ export const GameBoard = () => {
       unsubScore();
       unsubPlayerJoined();
       unsubState();
+      leaveGame(gameId, userId);
     };
   }, [gameId]);
 
@@ -123,27 +129,35 @@ export const GameBoard = () => {
   const handleScoreChange = async (amount) => {
     if (!selectedPlayer || isLocked) return;
 
+    const playerId = selectedPlayer.player_id;
+    const requestId = ++scoreRequestIdRef.current;
+
+    setPlayers((prev) => prev.map((player) =>
+      player.player_id === playerId
+        ? { ...player, current_score: Math.max(0, player.current_score + amount) }
+        : player
+    ));
+    setSelectedPlayer((prev) => (
+      prev && prev.player_id === playerId
+        ? { ...prev, current_score: Math.max(0, prev.current_score + amount) }
+        : prev
+    ));
+
     try {
-      const result = await updateScore(gameId, selectedPlayer.player_id, amount);
-      setPlayers((prev) =>
-        prev.map((p) =>
-          p.player_id === selectedPlayer.player_id
-            ? { ...p, current_score: result.newScore }
-            : p
-        )
-      );
-      setSelectedPlayer({ ...selectedPlayer, current_score: result.newScore });
-      loadHistory(selectedPlayer.player_id);
-      // Tell the other players in this game
-      emitScoreUpdate(
-        gameId,
-        selectedPlayer.player_id,
-        result.newScore,
-        amount,
-        userId
-      );
+      await updateScore(gameId, playerId, amount);
+      if (requestId !== scoreRequestIdRef.current) return;
+      if (selectedPlayerIdRef.current === playerId) loadHistory(playerId);
     } catch (error) {
       console.error('Failed to update score:', error);
+      if (requestId !== scoreRequestIdRef.current) return;
+      const data = await getGame(gameId);
+      setGameData(data.game);
+      setPlayers(data.players);
+      setSelectedPlayer((prev) =>
+        prev?.player_id === playerId
+          ? data.players.find((player) => player.player_id === playerId) || prev
+          : prev
+      );
     }
   };
 
@@ -162,7 +176,7 @@ export const GameBoard = () => {
     try {
       const updated = await updateGameStatus(gameId, next);
       setGameData((prev) => ({ ...(prev || {}), ...updated }));
-      emitGameStateChange(gameId, next); // tell everyone else in the room
+      emitGameStateChange(gameId, next, userId); // tell everyone else in the room
     } catch (error) {
       console.error('Failed to update game status:', error);
       alert(error.response?.data?.error || 'Failed to update the game');

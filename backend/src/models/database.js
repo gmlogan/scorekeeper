@@ -7,6 +7,7 @@ class Database {
     this.dbPath = path.join(__dirname, '..', '..', 'database', 'scorekeeper.db');
     this.dbDir = path.dirname(this.dbPath);
     this.db = null;
+    this.scoreQueues = new Map();
   }
 
   connect() {
@@ -244,39 +245,95 @@ class Database {
 
   // Score operations
   updatePlayerScore(gameId, playerId, newScore, changeAmount, editedByUserId) {
+    return this.enqueueScoreMutation(gameId, playerId, () =>
+      this.updatePlayerScoreNow(gameId, playerId, newScore, changeAmount, editedByUserId)
+    );
+  }
+
+  changePlayerScore(gameId, playerId, changeAmount, editedByUserId) {
+    return this.enqueueScoreMutation(gameId, playerId, () =>
+      new Promise((resolve, reject) => {
+        this.db.get(
+          'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
+          [gameId, playerId],
+          (err, row) => {
+            if (err) return reject(err);
+            if (!row) return reject(new Error('Player not in game'));
+
+            const newScore = row.current_score + changeAmount;
+            if (newScore < 0) return reject(new Error('Score cannot be negative'));
+
+            this.updatePlayerScoreNow(
+              gameId,
+              playerId,
+              newScore,
+              changeAmount,
+              editedByUserId
+            ).then(resolve, reject);
+          }
+        );
+      })
+    );
+  }
+
+  setPlayerScore(gameId, playerId, newScore, editedByUserId) {
+    return this.enqueueScoreMutation(gameId, playerId, () =>
+      new Promise((resolve, reject) => {
+        this.db.get(
+          'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
+          [gameId, playerId],
+          (err, row) => {
+            if (err) return reject(err);
+            if (!row) return reject(new Error('Player not in game'));
+            this.updatePlayerScoreNow(
+              gameId,
+              playerId,
+              newScore,
+              newScore - row.current_score,
+              editedByUserId
+            ).then(resolve, reject);
+          }
+        );
+      })
+    );
+  }
+
+  enqueueScoreMutation(gameId, playerId, mutation) {
+    const key = `${gameId}:${playerId}`;
+    const previous = this.scoreQueues.get(key) || Promise.resolve();
+    const current = previous.catch(() => {}).then(mutation);
+    const cleanup = current.then(() => {
+      if (this.scoreQueues.get(key) === cleanup) this.scoreQueues.delete(key);
+    }, () => {
+      if (this.scoreQueues.get(key) === cleanup) this.scoreQueues.delete(key);
+    });
+    this.scoreQueues.set(key, cleanup);
+    return current;
+  }
+
+  updatePlayerScoreNow(gameId, playerId, newScore, changeAmount, editedByUserId) {
     return new Promise((resolve, reject) => {
-      // Get current score
       this.db.get(
         'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
         [gameId, playerId],
         (err, row) => {
-          if (err) {
-            reject(err);
-            return;
-          }
+          if (err) return reject(err);
+          if (!row) return reject(new Error('Player not in game'));
 
-          const previousScore = row?.current_score || 0;
-
-          // Update score in game_players
+          const previousScore = row.current_score;
           this.db.run(
             'UPDATE game_players SET current_score = ? WHERE game_id = ? AND player_id = ?',
             [newScore, gameId, playerId],
-            (err) => {
-              if (err) {
-                reject(err);
-                return;
-              }
+            (updateErr) => {
+              if (updateErr) return reject(updateErr);
 
-              // Add to score history
               const { v4: uuidv4 } = require('uuid');
-              const historyId = uuidv4();
-
               this.db.run(
                 `INSERT INTO score_history (id, game_id, player_id, previous_score, new_score, change_amount, edited_by_id)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [historyId, gameId, playerId, previousScore, newScore, changeAmount, editedByUserId],
-                (err) => {
-                  if (err) reject(err);
+                [uuidv4(), gameId, playerId, previousScore, newScore, changeAmount, editedByUserId],
+                (historyErr) => {
+                  if (historyErr) reject(historyErr);
                   else resolve({ previousScore, newScore });
                 }
               );

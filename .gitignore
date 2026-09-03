@@ -1,3 +1,5 @@
+test-results/
+playwright-report/
 # Dependencies
 node_modules/
 npm-debug.log*

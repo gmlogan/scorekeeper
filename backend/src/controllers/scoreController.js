@@ -1,6 +1,7 @@
 class ScoreController {
-  constructor(db) {
+  constructor(db, onScoreUpdated = () => {}) {
     this.db = db;
+    this.onScoreUpdated = onScoreUpdated;
   }
 
   async updateScore(req, res) {
@@ -35,41 +36,30 @@ class ScoreController {
         return res.status(403).json({ error: 'Not authorized to update this score' });
       }
 
-      // Get current score
-      const gamePlayer = await new Promise((resolve, reject) => {
-        this.db.db.get(
-          'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
-          [gameId, playerId],
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
-
-      if (!gamePlayer) {
-        return res.status(404).json({ error: 'Player not in game' });
+      let result;
+      try {
+        result = await this.db.changePlayerScore(gameId, playerId, changeAmount, userId);
+      } catch (error) {
+        if (error.message === 'Player not in game') {
+          return res.status(404).json({ error: error.message });
+        }
+        if (error.message === 'Score cannot be negative') {
+          return res.status(400).json({ error: error.message });
+        }
+        throw error;
       }
 
-      const newScore = gamePlayer.current_score + changeAmount;
-
-      if (newScore < 0) {
-        return res.status(400).json({ error: 'Score cannot be negative' });
-      }
-
-      const result = await this.db.updatePlayerScore(
-        gameId,
+      this.onScoreUpdated(gameId, {
         playerId,
-        newScore,
-        changeAmount,
-        userId
-      );
+        newScore: result.newScore,
+        editedBy: userId,
+      });
 
       res.json({
         playerId,
         previousScore: result.previousScore,
         newScore: result.newScore,
-        changeAmount
+        changeAmount: result.newScore - result.previousScore
       });
     } catch (error) {
       console.error('Error updating score:', error);
@@ -109,37 +99,22 @@ class ScoreController {
         return res.status(403).json({ error: 'Not authorized to update this score' });
       }
 
-      // Get current score
-      const gamePlayer = await new Promise((resolve, reject) => {
-        this.db.db.get(
-          'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
-          [gameId, playerId],
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
-
-      if (!gamePlayer) {
-        return res.status(404).json({ error: 'Player not in game' });
+      let result;
+      try {
+        result = await this.db.setPlayerScore(gameId, playerId, score, userId);
+      } catch (error) {
+        if (error.message === 'Player not in game') {
+          return res.status(404).json({ error: error.message });
+        }
+        throw error;
       }
-
-      const changeAmount = score - gamePlayer.current_score;
-
-      const result = await this.db.updatePlayerScore(
-        gameId,
-        playerId,
-        score,
-        changeAmount,
-        userId
-      );
+      this.onScoreUpdated(gameId, { playerId, newScore: result.newScore, editedBy: userId });
 
       res.json({
         playerId,
         previousScore: result.previousScore,
         newScore: result.newScore,
-        changeAmount
+        changeAmount: result.newScore - result.previousScore
       });
     } catch (error) {
       console.error('Error setting score:', error);

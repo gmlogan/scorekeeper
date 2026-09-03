@@ -1,4 +1,4 @@
-FROM node:18-alpine AS build-frontend
+FROM node:22-alpine AS build-frontend
 
 WORKDIR /app/frontend
 
@@ -9,7 +9,7 @@ COPY frontend/ .
 RUN npm run build
 
 # Backend stage
-FROM node:18-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
@@ -22,8 +22,10 @@ COPY backend/ .
 # Copy built frontend
 COPY --from=build-frontend /app/frontend/dist ./public
 
-# Create database directory
-RUN mkdir -p /app/database
+# Create database directory, owned by the unprivileged 'node' user (already
+# built into the base image) so the app doesn't run as root.
+RUN mkdir -p /app/database && chown -R node:node /app
+USER node
 
 # Expose port
 EXPOSE 5000

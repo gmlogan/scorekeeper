@@ -139,6 +139,12 @@ export const GameBoard = () => {
   const history = selectedPlayer
     ? (historyByPlayer[selectedPlayer.player_id] || []).slice(0, 5)
     : [];
+  // Fixed 5-slot stack, oldest -> newest left to right, left-padded with
+  // empties. A new entry shifts everything left; the oldest falls off.
+  const historySlots = [
+    ...Array(Math.max(0, 5 - history.length)).fill(null),
+    ...[...history].reverse(),
+  ];
 
   const status = gameData?.status || 'active';
   const isPaused = status === 'paused';
@@ -356,36 +362,52 @@ export const GameBoard = () => {
               </p>
             )}
 
-            {/* Last 5 score entries (the amount added/subtracted, not the total) */}
+            {/* Recent entries — a left-to-right stack of the last 5 changes.
+                Newest sits on the right; a new one pushes the oldest off the left. */}
             {history.length > 0 && (
               <div className="mt-6">
                 <p className="text-sm font-semibold text-gray-600 mb-2">
                   Recent entries
                 </p>
-                <div className="divide-y divide-gray-100">
-                  {history.map((h, i) => (
+                <div className="flex gap-1.5">
+                  {historySlots.map((entry, i) => (
                     <div
-                      key={h.id}
-                      className="flex items-center justify-between py-2 text-sm"
+                      key={i}
+                      className={`flex-1 min-h-[3rem] flex flex-col items-center justify-center rounded-lg border px-1 py-2 text-center transition-colors ${
+                        !entry
+                          ? 'border-dashed border-gray-200 bg-gray-50'
+                          : entry.change_amount >= 0
+                          ? 'border-green-200 bg-green-50'
+                          : 'border-red-200 bg-red-50'
+                      }`}
                     >
-                      <span
-                        className={`font-bold w-14 ${
-                          h.change_amount >= 0
-                            ? 'text-green-600'
-                            : 'text-red-600'
-                        }`}
-                      >
-                        {h.change_amount >= 0 ? '+' : ''}
-                        {h.change_amount}
-                      </span>
-                      <span className="flex-1 text-gray-600">
-                        {i === 0 ? 'Latest' : `${i + 1} entries ago`}
-                      </span>
-                      <span className="text-gray-400">
-                        {formatEntryTime(h.timestamp)}
-                      </span>
+                      {entry ? (
+                        <>
+                          <span
+                            className={`text-base font-bold leading-none ${
+                              entry.change_amount >= 0
+                                ? 'text-green-700'
+                                : 'text-red-700'
+                            }`}
+                          >
+                            {entry.change_amount >= 0 ? '+' : ''}
+                            {entry.change_amount}
+                          </span>
+                          <span className="mt-1 text-[10px] leading-none text-gray-400">
+                            {formatEntryTime(entry.timestamp)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-base font-bold leading-none text-gray-300">
+                          –
+                        </span>
+                      )}
                     </div>
                   ))}
+                </div>
+                <div className="mt-1 flex justify-between text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  <span>Previous</span>
+                  <span>Latest</span>
                 </div>
               </div>
             )}

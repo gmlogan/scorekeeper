@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
 class Database {
   constructor() {
@@ -10,57 +11,105 @@ class Database {
     this.scoreQueues = new Map();
   }
 
+  _exec(sql) {
+    return new Promise((resolve, reject) => {
+      this.db.exec(sql, (err) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  _get(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+    });
+  }
+
   connect() {
     return new Promise((resolve, reject) => {
-      // Ensure directory exists
       if (!fs.existsSync(this.dbDir)) {
         fs.mkdirSync(this.dbDir, { recursive: true });
       }
 
-      this.db = new sqlite3.Database(this.dbPath, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+      this.db = new sqlite3.Database(this.dbPath, async (err) => {
+        if (err) return reject(err);
 
-        this.db.run('PRAGMA foreign_keys = ON');
-
-        // Apply the schema on every start. Every statement is
-        // "CREATE ... IF NOT EXISTS", so this is safe and idempotent.
-        const schemaPath = path.join(this.dbDir, 'schema.sql');
-        let schema = null;
         try {
-          schema = fs.readFileSync(schemaPath, 'utf-8');
-        } catch (readErr) {
-          console.warn('No schema.sql found, skipping schema init:', readErr.message);
-        }
+          await this._exec('PRAGMA foreign_keys = ON');
 
-        const done = () => {
+          // Schema statements are all "CREATE ... IF NOT EXISTS" — safe to run
+          // on every start.
+          const schemaPath = path.join(this.dbDir, 'schema.sql');
+          if (fs.existsSync(schemaPath)) {
+            await this._exec(fs.readFileSync(schemaPath, 'utf-8'));
+          } else {
+            console.warn('No schema.sql found, skipping schema init');
+          }
+
+          await this._migrate();
+
           console.log('Connected to database at:', this.dbPath);
           resolve();
-        };
-
-        if (schema) {
-          this.db.exec(schema, (schemaErr) => {
-            if (schemaErr) reject(schemaErr);
-            else done();
-          });
-        } else {
-          done();
+        } catch (initErr) {
+          reject(initErr);
         }
       });
     });
   }
 
+  // Forward-only migrations, gated by PRAGMA user_version.
+  async _migrate() {
+    const row = await this._get('PRAGMA user_version');
+    const version = row ? row.user_version : 0;
+
+    if (version < 1) {
+      // v1: drop the global UNIQUE constraint on users.username. Identity is
+      // the session token now; the name is only a label. SQLite can't drop a
+      // column constraint in place, so rebuild the table.
+      await this._exec(`
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        CREATE TABLE IF NOT EXISTS users_v1 (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          display_name TEXT,
+          avatar_url TEXT,
+          session_token TEXT UNIQUE,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO users_v1 (id, username, display_name, avatar_url, session_token, created_at, updated_at)
+          SELECT id, username, display_name, avatar_url, session_token, created_at, updated_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_v1 RENAME TO users;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+        PRAGMA user_version=1;
+      `);
+      console.log('DB migration v1 applied (users.username no longer unique)');
+    }
+  }
+
   // User operations
-  createUser(id, username, displayName) {
+  createUser(id, username, displayName, sessionTokenHash = null) {
     return new Promise((resolve, reject) => {
       this.db.run(
-        'INSERT INTO users (id, username, display_name) VALUES (?, ?, ?)',
-        [id, username, displayName],
+        'INSERT INTO users (id, username, display_name, session_token) VALUES (?, ?, ?, ?)',
+        [id, username, displayName, sessionTokenHash],
         (err) => {
           if (err) reject(err);
-          else resolve({ id, username, displayName });
+          else resolve({ id, username, display_name: displayName });
+        }
+      );
+    });
+  }
+
+  getUserBySessionToken(sessionTokenHash) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        'SELECT * FROM users WHERE session_token = ?',
+        [sessionTokenHash],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
         }
       );
     });
@@ -327,14 +376,29 @@ class Database {
             (updateErr) => {
               if (updateErr) return reject(updateErr);
 
-              const { v4: uuidv4 } = require('uuid');
+              // Millisecond-precision UTC timestamp in the same shape as
+              // CURRENT_TIMESTAMP ("YYYY-MM-DD HH:MM:SS.mmm"), generated here
+              // so the stored value and the value we hand back to the
+              // in-memory room are identical and entries made in the same
+              // second still sort in the order they happened.
+              const entryId = uuidv4();
+              const timestamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
               this.db.run(
-                `INSERT INTO score_history (id, game_id, player_id, previous_score, new_score, change_amount, edited_by_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [uuidv4(), gameId, playerId, previousScore, newScore, changeAmount, editedByUserId],
+                `INSERT INTO score_history (id, game_id, player_id, previous_score, new_score, change_amount, edited_by_id, timestamp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [entryId, gameId, playerId, previousScore, newScore, changeAmount, editedByUserId, timestamp],
                 (historyErr) => {
                   if (historyErr) reject(historyErr);
-                  else resolve({ previousScore, newScore });
+                  else resolve({
+                    previousScore,
+                    newScore,
+                    entry: {
+                      id: entryId,
+                      change_amount: changeAmount,
+                      new_score: newScore,
+                      timestamp,
+                    },
+                  });
                 }
               );
             }
@@ -349,7 +413,7 @@ class Database {
       this.db.all(
         `SELECT * FROM score_history
          WHERE game_id = ? AND player_id = ?
-         ORDER BY timestamp DESC
+         ORDER BY timestamp DESC, rowid DESC
          LIMIT ?`,
         [gameId, playerId, limit],
         (err, rows) => {

@@ -1,15 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../hooks/useGame';
-
-// Simple UUID generator
-const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-};
 
 export const Home = () => {
   const navigate = useNavigate();
@@ -21,26 +12,13 @@ export const Home = () => {
 
     try {
       setLoading(true);
-      const userId = generateUUID();
-      const sessionToken = 'token_' + userId;
 
-      // Create user in backend (same origin; headers are explicit because
-      // localStorage has no userId yet on first run)
-      const response = await api.post(
-        '/users',
-        { username: username.trim() },
-        {
-          headers: {
-            'x-user-id': userId,
-            'x-session-token': sessionToken,
-          },
-        }
-      );
+      // Register: the server mints the id + session token.
+      const { data } = await api.post('/users', { username: username.trim() });
 
-      // Store credentials
-      localStorage.setItem('username', username);
-      localStorage.setItem('userId', response.data.id || userId);
-      localStorage.setItem('sessionToken', sessionToken);
+      localStorage.setItem('username', data.display_name || username.trim());
+      localStorage.setItem('userId', data.id);
+      localStorage.setItem('sessionToken', data.sessionToken);
       window.location.reload();
     } catch (error) {
       console.error('Failed to create user:', error);

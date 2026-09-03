@@ -1,8 +1,11 @@
 const { v4: uuidv4 } = require('uuid');
 
 class GameController {
-  constructor(db) {
+  // `onGameChanged(gameId)` signals the realtime layer to re-broadcast this
+  // game's state (roster / status changes made over REST).
+  constructor(db, onGameChanged = () => {}) {
     this.db = db;
+    this.onGameChanged = onGameChanged;
   }
 
   // Generate unique game code (format: ABC-1234)
@@ -20,8 +23,6 @@ class GameController {
       const { name, players, targetScore, timeLimit } = req.body;
       const hostId = req.userId;
 
-      console.log('Create game request:', { name, players, targetScore, timeLimit, hostId });
-
       if (!name || name.trim().length === 0) {
         return res.status(400).json({ error: 'Game name is required' });
       }
@@ -37,8 +38,6 @@ class GameController {
         codeExists = !!existing;
       }
 
-      console.log('Generated game code:', code);
-
       await this.db.createGame(
         gameId,
         code,
@@ -48,13 +47,9 @@ class GameController {
         timeLimit || null
       );
 
-      console.log('Game created:', gameId);
-
       // Add host as first player
       const hostGamePlayerId = uuidv4();
       await this.db.addPlayerToGame(hostGamePlayerId, gameId, hostId);
-
-      console.log('Host added as player');
 
       // Add other players if provided
       if (players && Array.isArray(players)) {
@@ -75,12 +70,8 @@ class GameController {
         }
       }
 
-      console.log('Other players added');
-
       const gameData = await this.db.getGameById(gameId);
       const gamePlayers = await this.db.getGamePlayers(gameId);
-
-      console.log('Game response:', { gameData, gamePlayers });
 
       res.status(201).json({
         ...gameData,
@@ -94,48 +85,33 @@ class GameController {
 
   async joinGame(req, res) {
     try {
-      const { code, username } = req.body;
+      const { code } = req.body;
+      const userId = req.userId; // authenticated
 
-      console.log('Join game request:', { code, username });
-
-      if (!code || !username) {
-        return res.status(400).json({ error: 'Code and username are required' });
+      if (!code) {
+        return res.status(400).json({ error: 'Game code is required' });
       }
 
       const game = await this.db.getGameByCode(code);
-      console.log('Game found by code:', game);
-      
       if (!game) {
         return res.status(404).json({ error: 'Game not found' });
       }
 
-      // Create or get user
-      let user = await this.db.getUserByUsername(username);
-      if (!user) {
-        const newUserId = uuidv4();
-        user = await this.db.createUser(newUserId, username, username);
-        console.log('New user created:', user);
-      } else {
-        console.log('Existing user found:', user);
+      // Add the authenticated user to the game (idempotent — re-joining is fine).
+      const roster = await this.db.getGamePlayers(game.id);
+      if (!roster.some((p) => p.player_id === userId)) {
+        await this.db.addPlayerToGame(uuidv4(), game.id, userId);
       }
 
-      // Add player to game
-      const gamePlayerId = uuidv4();
-      await this.db.addPlayerToGame(gamePlayerId, game.id, user.id);
-      console.log('Player added to game');
-
       const gamePlayers = await this.db.getGamePlayers(game.id);
-      console.log('Game players fetched:', gamePlayers);
 
-      const response = {
+      this.onGameChanged(game.id);
+
+      res.status(200).json({
         game,
         players: gamePlayers,
-        userId: user.id
-      };
-      
-      console.log('Join game response:', response);
-
-      res.status(200).json(response);
+        userId,
+      });
     } catch (error) {
       console.error('Error joining game:', error);
       res.status(500).json({ error: error.message || 'Failed to join game' });
@@ -264,6 +240,8 @@ class GameController {
       await this.db.updateGameStatus(gameId, status);
       const updated = await this.db.getGameById(gameId);
 
+      this.onGameChanged(gameId);
+
       res.json(updated);
     } catch (error) {
       console.error('Error updating game status:', error);
@@ -287,6 +265,8 @@ class GameController {
 
       await this.db.removePlayerFromGame(gameId, playerId);
       const gamePlayers = await this.db.getGamePlayers(gameId);
+
+      this.onGameChanged(gameId);
 
       res.json({ players: gamePlayers });
     } catch (error) {

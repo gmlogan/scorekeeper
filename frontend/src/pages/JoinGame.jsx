@@ -34,7 +34,7 @@ export const JoinGame = () => {
 
     try {
       setLoading(true);
-      const result = await joinGame(code, username);
+      const result = await joinGame(code);
       navigate(`/game/${result.game.id}`);
     } catch (error) {
       setError(error.response?.data?.error || 'Failed to join game');

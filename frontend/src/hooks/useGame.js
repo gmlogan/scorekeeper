@@ -11,14 +11,10 @@ export const api = axios.create({
   baseURL: `${API_URL}/api`,
 });
 
-// Add interceptor to include user headers
+// Attach the server-issued bearer token to every request.
 api.interceptors.request.use((config) => {
-  const userId = localStorage.getItem('userId');
   const sessionToken = localStorage.getItem('sessionToken');
-
-  if (userId) config.headers['x-user-id'] = userId;
-  if (sessionToken) config.headers['x-session-token'] = sessionToken;
-
+  if (sessionToken) config.headers['Authorization'] = `Bearer ${sessionToken}`;
   return config;
 });
 
@@ -50,10 +46,10 @@ export const useGameAPI = () => {
   );
 
   const joinGame = useCallback(
-    async (code, username) => {
+    async (code) => {
       try {
         setLoading(true);
-        const response = await api.post('/games/join', { code, username });
+        const response = await api.post('/games/join', { code });
         setGame(response.data.game);
         setPlayers(response.data.players);
         localStorage.setItem('userId', response.data.userId);

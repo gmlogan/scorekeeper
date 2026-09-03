@@ -3,16 +3,13 @@ import request from 'supertest';
 import { app, db } from '../../backend/src/server.js';
 
 const createUser = async (username) => {
-  const id = crypto.randomUUID();
-  const sessionToken = `test-token-${id}`;
-  const response = await request(app)
-    .post('/api/users')
-    .set('x-user-id', id)
-    .set('x-session-token', sessionToken)
-    .send({ username });
+  const response = await request(app).post('/api/users').send({ username });
   expect(response.status).toBe(201);
-  return { id: response.body.id || id, sessionToken };
+  expect(response.body.sessionToken).toBeTruthy();
+  return { id: response.body.id, sessionToken: response.body.sessionToken };
 };
+
+const authHeader = (user) => `Bearer ${user.sessionToken}`;
 
 describe('score API', () => {
   let host;
@@ -23,8 +20,7 @@ describe('score API', () => {
     host = await createUser(`api-host-${Date.now()}`);
     const response = await request(app)
       .post('/api/games')
-      .set('x-user-id', host.id)
-      .set('x-session-token', host.sessionToken)
+      .set('Authorization', authHeader(host))
       .send({ name: `api-game-${Date.now()}`, players: [] });
     expect(response.status).toBe(201);
     game = response.body;
@@ -33,16 +29,29 @@ describe('score API', () => {
   afterAll(async () => {
     await request(app)
       .delete('/api/games/hosted')
-      .set('x-user-id', host.id)
-      .set('x-session-token', host.sessionToken);
+      .set('Authorization', authHeader(host));
     await db.close();
+  });
+
+  it('rejects an unauthenticated score change', async () => {
+    const res = await request(app)
+      .post(`/api/scores/games/${game.id}/players/${host.id}/update`)
+      .send({ changeAmount: 5 });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a score change with a bogus token', async () => {
+    const res = await request(app)
+      .post(`/api/scores/games/${game.id}/players/${host.id}/update`)
+      .set('Authorization', 'Bearer not-a-real-token')
+      .send({ changeAmount: 5 });
+    expect(res.status).toBe(401);
   });
 
   it('persists an authorized score change', async () => {
     const update = await request(app)
       .post(`/api/scores/games/${game.id}/players/${host.id}/update`)
-      .set('x-user-id', host.id)
-      .set('x-session-token', host.sessionToken)
+      .set('Authorization', authHeader(host))
       .send({ changeAmount: 5 });
 
     expect(update.status).toBe(200);
@@ -57,8 +66,7 @@ describe('score API', () => {
     const updates = await Promise.all(
       Array.from({ length: 5 }, () => request(app)
         .post(`/api/scores/games/${game.id}/players/${host.id}/update`)
-        .set('x-user-id', host.id)
-        .set('x-session-token', host.sessionToken)
+        .set('Authorization', authHeader(host))
         .send({ changeAmount: 1 }))
     );
 
@@ -71,8 +79,7 @@ describe('score API', () => {
   it('returns the delta when setting an absolute score', async () => {
     const update = await request(app)
       .post(`/api/scores/games/${game.id}/players/${host.id}/set`)
-      .set('x-user-id', host.id)
-      .set('x-session-token', host.sessionToken)
+      .set('Authorization', authHeader(host))
       .send({ score: 3 });
 
     expect(update.status).toBe(200);

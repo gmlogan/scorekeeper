@@ -7,7 +7,7 @@ export const test = base.extend({
     const host = await createUser(request, uniqueName('host'));
     const guest = await createUser(request, uniqueName('guest'));
     const game = await createGame(request, host, uniqueName('game'));
-    await joinGame(request, game.code, guest.username);
+    await joinGame(request, guest, game.code);
 
     await use({ host, guest, game });
 
@@ -18,23 +18,14 @@ export const test = base.extend({
 export { expect };
 
 const authHeaders = (user) => ({
-  'x-user-id': user.id,
-  'x-session-token': user.sessionToken,
+  Authorization: `Bearer ${user.sessionToken}`,
 });
 
 const createUser = async (request, username) => {
-  const id = crypto.randomUUID();
-  const sessionToken = `test-token-${id}`;
-  const response = await request.post('/api/users', {
-    data: { username },
-    headers: {
-      'x-user-id': id,
-      'x-session-token': sessionToken,
-    },
-  });
+  const response = await request.post('/api/users', { data: { username } });
   expect(response.ok()).toBeTruthy();
   const body = await response.json();
-  return { id: body.id || id, username, sessionToken };
+  return { id: body.id, username, sessionToken: body.sessionToken };
 };
 
 const createGame = async (request, user, name) => {
@@ -46,9 +37,10 @@ const createGame = async (request, user, name) => {
   return response.json();
 };
 
-const joinGame = async (request, code, username) => {
+const joinGame = async (request, user, code) => {
   const response = await request.post('/api/games/join', {
-    data: { code, username },
+    data: { code },
+    headers: authHeaders(user),
   });
   expect(response.ok()).toBeTruthy();
   return response.json();

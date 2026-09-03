@@ -1,67 +1,38 @@
+const { ScoreError, applyScoreChange, applyScoreSet } = require('../services/scoreService');
+
 class ScoreController {
-  constructor(db, onScoreUpdated = () => {}) {
+  // `onScoreChanged(gameId)` is a signal to the realtime layer that this
+  // game's state should be re-broadcast. It carries no payload — the
+  // broadcaster reads the authoritative state itself.
+  constructor(db, onScoreChanged = () => {}) {
     this.db = db;
-    this.onScoreUpdated = onScoreUpdated;
+    this.onScoreChanged = onScoreChanged;
   }
 
   async updateScore(req, res) {
     try {
       const { gameId, playerId } = req.params;
       const { changeAmount } = req.body;
-      const userId = req.userId;
 
-      if (typeof changeAmount !== 'number') {
-        return res.status(400).json({ error: 'changeAmount must be a number' });
-      }
-
-      const game = await this.db.getGameById(gameId);
-      if (!game) {
-        return res.status(404).json({ error: 'Game not found' });
-      }
-
-      if (game.status !== 'active') {
-        return res.status(409).json({
-          error:
-            game.status === 'paused'
-              ? 'Game is paused by the host'
-              : 'Game has ended',
-        });
-      }
-
-      // Check if user is host or the player themselves
-      const isHost = game.host_id === userId;
-      const isOwnScore = playerId === userId;
-
-      if (!isHost && !isOwnScore) {
-        return res.status(403).json({ error: 'Not authorized to update this score' });
-      }
-
-      let result;
-      try {
-        result = await this.db.changePlayerScore(gameId, playerId, changeAmount, userId);
-      } catch (error) {
-        if (error.message === 'Player not in game') {
-          return res.status(404).json({ error: error.message });
-        }
-        if (error.message === 'Score cannot be negative') {
-          return res.status(400).json({ error: error.message });
-        }
-        throw error;
-      }
-
-      this.onScoreUpdated(gameId, {
+      const result = await applyScoreChange(this.db, {
+        gameId,
         playerId,
-        newScore: result.newScore,
-        editedBy: userId,
+        changeAmount,
+        userId: req.userId,
       });
+
+      this.onScoreChanged(gameId);
 
       res.json({
         playerId,
         previousScore: result.previousScore,
         newScore: result.newScore,
-        changeAmount: result.newScore - result.previousScore
+        changeAmount: result.newScore - result.previousScore,
       });
     } catch (error) {
+      if (error instanceof ScoreError) {
+        return res.status(error.status).json({ error: error.message });
+      }
       console.error('Error updating score:', error);
       res.status(500).json({ error: 'Failed to update score' });
     }
@@ -71,52 +42,26 @@ class ScoreController {
     try {
       const { gameId, playerId } = req.params;
       const { score } = req.body;
-      const userId = req.userId;
 
-      if (typeof score !== 'number' || score < 0) {
-        return res.status(400).json({ error: 'Score must be a non-negative number' });
-      }
+      const result = await applyScoreSet(this.db, {
+        gameId,
+        playerId,
+        score,
+        userId: req.userId,
+      });
 
-      const game = await this.db.getGameById(gameId);
-      if (!game) {
-        return res.status(404).json({ error: 'Game not found' });
-      }
-
-      if (game.status !== 'active') {
-        return res.status(409).json({
-          error:
-            game.status === 'paused'
-              ? 'Game is paused by the host'
-              : 'Game has ended',
-        });
-      }
-
-      // Check if user is host or the player themselves
-      const isHost = game.host_id === userId;
-      const isOwnScore = playerId === userId;
-
-      if (!isHost && !isOwnScore) {
-        return res.status(403).json({ error: 'Not authorized to update this score' });
-      }
-
-      let result;
-      try {
-        result = await this.db.setPlayerScore(gameId, playerId, score, userId);
-      } catch (error) {
-        if (error.message === 'Player not in game') {
-          return res.status(404).json({ error: error.message });
-        }
-        throw error;
-      }
-      this.onScoreUpdated(gameId, { playerId, newScore: result.newScore, editedBy: userId });
+      this.onScoreChanged(gameId);
 
       res.json({
         playerId,
         previousScore: result.previousScore,
         newScore: result.newScore,
-        changeAmount: result.newScore - result.previousScore
+        changeAmount: result.newScore - result.previousScore,
       });
     } catch (error) {
+      if (error instanceof ScoreError) {
+        return res.status(error.status).json({ error: error.message });
+      }
       console.error('Error setting score:', error);
       res.status(500).json({ error: 'Failed to set score' });
     }
@@ -154,7 +99,7 @@ class ScoreController {
       res.json({
         gameId,
         gameName: game.name,
-        players
+        players,
       });
     } catch (error) {
       console.error('Error fetching leaderboard:', error);

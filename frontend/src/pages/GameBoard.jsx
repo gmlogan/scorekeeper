@@ -15,102 +15,130 @@ const formatEntryTime = (value) => {
 export const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
-  const { getGame, updateScore, getScoreHistory, updateGameStatus } = useGameAPI();
-  const { joinGame, leaveGame, on, emitGameStateChange } = useWebSocket();
+  const { getGame, updateGameStatus } = useGameAPI();
+  const { joinGame, leaveGame, on, emitScoreChange, requestResync } = useWebSocket();
   const [players, setPlayers] = useState([]);
   const [gameData, setGameData] = useState(null);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [scoreInput, setScoreInput] = useState('1');
-  const [history, setHistory] = useState([]);
+  // Last few score entries per player, seeded and kept live by `game:state`.
+  const [historyByPlayer, setHistoryByPlayer] = useState({});
   const [loading, setLoading] = useState(true);
   const userId = localStorage.getItem('userId');
-  const selectedPlayerIdRef = useRef(null);
   const scoreRequestIdRef = useRef(0);
+  // Version of the last `game:state` frame we applied; frames that aren't
+  // strictly newer are ignored (guards against out-of-order delivery).
+  const stateVersionRef = useRef(0);
 
-  useEffect(() => {
-    selectedPlayerIdRef.current = selectedPlayer?.player_id ?? null;
-  }, [selectedPlayer?.player_id]);
-
-  const loadHistory = async (playerId) => {
-    try {
-      if (selectedPlayerIdRef.current !== playerId) return;
-      const rows = await getScoreHistory(gameId, playerId);
-      if (selectedPlayerIdRef.current !== playerId) return;
-      // Most recent first; keep the last 5 entries only
-      setHistory((rows || []).slice(0, 5));
-    } catch (error) {
-      console.error('Failed to load score history:', error);
-      if (selectedPlayerIdRef.current === playerId) {
-        setHistory([]);
-      }
-    }
+  // Pull the authoritative game + roster once for a deterministic first paint.
+  // All later updates arrive over the socket as `game:state`.
+  const reconcileFromRest = async () => {
+    const data = await getGame(gameId);
+    setGameData(data.game);
+    setPlayers(data.players);
+    setSelectedPlayer((prev) =>
+      prev ? data.players.find((p) => p.player_id === prev.player_id) || null : prev
+    );
+    return data;
   };
 
   useEffect(() => {
-    // Fetch game + roster only. Does NOT re-join the socket room.
-    const refreshGame = async () => {
+    let cancelled = false;
+
+    (async () => {
       try {
         const data = await getGame(gameId);
-        setGameData(data.game);
-        setPlayers(data.players);
+        // Only seed from REST if a socket frame hasn't already landed.
+        if (!cancelled && stateVersionRef.current === 0) {
+          setGameData(data.game);
+          setPlayers(data.players);
+        }
       } catch (error) {
         console.error('Failed to load game:', error);
-        navigate('/');
+        if (!cancelled) navigate('/');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    joinGame(gameId); // identity comes from the socket's bearer token
+
+    // Full authoritative frame: join, resync reply, or a roster/status change.
+    const applyFull = (state) => {
+      if (!state || state.version < stateVersionRef.current) return;
+      stateVersionRef.current = state.version;
+
+      setGameData((prev) => ({ ...(prev || {}), ...state.game }));
+      setPlayers(state.players);
+      setHistoryByPlayer(state.history || {});
+      setSelectedPlayer((prev) =>
+        prev ? state.players.find((p) => p.player_id === prev.player_id) || null : prev
+      );
+      setLoading(false);
+    };
+
+    // Incremental score frame. Must arrive exactly one version after the last
+    // applied frame; a gap means we missed one, so ask for a full resync.
+    const applyPatch = (patch) => {
+      if (!patch || patch.version <= stateVersionRef.current) return;
+      if (patch.version !== stateVersionRef.current + 1) {
+        requestResync(gameId);
+        return;
+      }
+      stateVersionRef.current = patch.version;
+
+      for (const change of patch.changes || []) {
+        setPlayers((prev) =>
+          prev.map((p) =>
+            p.player_id === change.playerId
+              ? { ...p, current_score: change.newScore }
+              : p
+          )
+        );
+        setSelectedPlayer((prev) =>
+          prev && prev.player_id === change.playerId
+            ? { ...prev, current_score: change.newScore }
+            : prev
+        );
+        if (change.entry) {
+          setHistoryByPlayer((prev) => {
+            const current = prev[change.playerId] || [];
+            return {
+              ...prev,
+              [change.playerId]: [change.entry, ...current].slice(0, 5),
+            };
+          });
+        }
       }
     };
 
-    refreshGame();
-    joinGame(gameId, userId); // join the socket room once, on mount
+    // On (re)connect, our version baseline is stale — drop it and re-join so
+    // the server sends a fresh full frame.
+    const onOpen = () => {
+      stateVersionRef.current = 0;
+      joinGame(gameId);
+    };
 
-    // Set up WebSocket listeners
-    const unsubScore = on('scores-updated', ({ updates }) => {
-      const ownUpdates = new Set(
-        updates.filter((update) => update.editedBy === userId).map((update) => update.playerId)
-      );
-      setPlayers((prev) => prev.map((player) => {
-        const update = updates.find((entry) => entry.playerId === player.player_id);
-        return update && !ownUpdates.has(player.player_id)
-          ? { ...player, current_score: update.newScore }
-          : player;
-      }));
-      setSelectedPlayer((prev) => {
-        if (!prev || ownUpdates.has(prev.player_id)) return prev;
-        const update = updates.find((entry) => entry.playerId === prev.player_id);
-        return update ? { ...prev, current_score: update.newScore } : prev;
-      });
-      if (selectedPlayerIdRef.current && !ownUpdates.has(selectedPlayerIdRef.current)) {
-        loadHistory(selectedPlayerIdRef.current);
-      }
-    });
-
-    const unsubPlayerJoined = on('player-joined', (data) => {
-      // Ignore the echo of our own join; only refresh when someone else joins
-      if (data.userId === userId) return;
-      refreshGame();
-    });
-
-    const unsubState = on('game-state-changed', (data) => {
-      setGameData((prev) => (prev ? { ...prev, status: data.status } : prev));
-    });
+    const unsubFull = on('game:state', applyFull);
+    const unsubPatch = on('game:patch', applyPatch);
+    const unsubOpen = on('open', onOpen);
+    const unsubError = on('error', (err) =>
+      console.error('Socket error:', err?.message || err)
+    );
 
     return () => {
-      unsubScore();
-      unsubPlayerJoined();
-      unsubState();
-      leaveGame(gameId, userId);
+      cancelled = true;
+      unsubFull();
+      unsubPatch();
+      unsubOpen();
+      unsubError();
+      leaveGame(gameId);
     };
   }, [gameId]);
 
-  // Load the selected player's recent score entries
-  useEffect(() => {
-    if (selectedPlayer) {
-      loadHistory(selectedPlayer.player_id);
-    } else {
-      setHistory([]);
-    }
-  }, [selectedPlayer?.player_id]);
+  const history = selectedPlayer
+    ? (historyByPlayer[selectedPlayer.player_id] || []).slice(0, 5)
+    : [];
 
   const status = gameData?.status || 'active';
   const isPaused = status === 'paused';
@@ -132,6 +160,8 @@ export const GameBoard = () => {
     const playerId = selectedPlayer.player_id;
     const requestId = ++scoreRequestIdRef.current;
 
+    // Optimistic: instant local feedback. The next `game:state` frame carries
+    // the authoritative score + history entry.
     setPlayers((prev) => prev.map((player) =>
       player.player_id === playerId
         ? { ...player, current_score: Math.max(0, player.current_score + amount) }
@@ -143,21 +173,16 @@ export const GameBoard = () => {
         : prev
     ));
 
-    try {
-      await updateScore(gameId, playerId, amount);
-      if (requestId !== scoreRequestIdRef.current) return;
-      if (selectedPlayerIdRef.current === playerId) loadHistory(playerId);
-    } catch (error) {
-      console.error('Failed to update score:', error);
-      if (requestId !== scoreRequestIdRef.current) return;
-      const data = await getGame(gameId);
-      setGameData(data.game);
-      setPlayers(data.players);
-      setSelectedPlayer((prev) =>
-        prev?.player_id === playerId
-          ? data.players.find((player) => player.player_id === playerId) || prev
-          : prev
-      );
+    const res = await emitScoreChange(gameId, playerId, amount);
+    if (requestId !== scoreRequestIdRef.current) return;
+
+    if (!res.ok) {
+      console.error('Failed to update score:', res.error);
+      try {
+        await reconcileFromRest();
+      } catch (error) {
+        console.error('Failed to reconcile after score error:', error);
+      }
     }
   };
 
@@ -173,13 +198,19 @@ export const GameBoard = () => {
     };
     if (prompts[next] && !window.confirm(prompts[next])) return;
 
+    // Optimistic; the server broadcasts a `game:state` frame to the whole room.
+    setGameData((prev) => (prev ? { ...prev, status: next } : prev));
+
     try {
-      const updated = await updateGameStatus(gameId, next);
-      setGameData((prev) => ({ ...(prev || {}), ...updated }));
-      emitGameStateChange(gameId, next, userId); // tell everyone else in the room
+      await updateGameStatus(gameId, next);
     } catch (error) {
       console.error('Failed to update game status:', error);
       alert(error.response?.data?.error || 'Failed to update the game');
+      try {
+        await reconcileFromRest();
+      } catch (reconcileError) {
+        console.error('Failed to reconcile game status:', reconcileError);
+      }
     }
   };
 

@@ -70,13 +70,6 @@ export const CreateGame = () => {
   if (gameCode) {
     return (
       <div className="min-h-screen bg-gray-50 px-6 py-8 pb-24">
-        <button
-          onClick={() => navigate('/')}
-          className="mb-6 p-3 bg-gray-100 rounded-full inline-block"
-        >
-          ←
-        </button>
-
         <div className="max-w-md mx-auto">
           <h1 className="text-4xl font-bold mb-2">Create Scoreboard</h1>
           <p className="text-gray-600 mb-8">SETUP NEW GAME</p>
@@ -111,13 +104,6 @@ export const CreateGame = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 px-6 py-8 pb-24">
-      <button
-        onClick={() => navigate('/')}
-        className="mb-6 p-3 bg-gray-100 rounded-full inline-block"
-      >
-        ←
-      </button>
-
       <div className="max-w-md mx-auto">
         <h1 className="text-4xl font-bold mb-2">Create Scoreboard</h1>
         <p className="text-gray-600 mb-8">SETUP NEW GAME</p>

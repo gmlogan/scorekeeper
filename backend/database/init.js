@@ -1,38 +1,17 @@
-const sqlite3 = require('sqlite3').verbose();
-const fs = require('fs');
-const path = require('path');
+// Delegates to Database.connect() rather than execing schema.sql directly,
+// so `npm run init-db` can't produce a db that's missing migrations (it used
+// to exec schema.sql and stop — leaving `user_version=0` with none of the
+// forward-only migrations in `models/database.js` applied).
+const Database = require('../src/models/database');
 
-const dbDir = __dirname;
-const dbPath = path.join(dbDir, 'scorekeeper.db');
-const schemaPath = path.join(dbDir, 'schema.sql');
-
-// Ensure database directory exists
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-  console.log('Created database directory:', dbDir);
-}
-
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err);
-    process.exit(1);
-  }
-  console.log('Connected to SQLite database at:', dbPath);
-});
-
-// Read and execute schema
-const schema = fs.readFileSync(schemaPath, 'utf-8');
-db.exec(schema, (err) => {
-  if (err) {
+const db = new Database();
+db.connect()
+  .then(() => db.close())
+  .then(() => {
+    console.log('Database initialized at:', db.dbPath);
+    process.exit(0);
+  })
+  .catch((err) => {
     console.error('Error initializing database:', err);
     process.exit(1);
-  }
-  console.log('Database schema initialized successfully');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err);
-      process.exit(1);
-    }
-    process.exit(0);
   });
-});

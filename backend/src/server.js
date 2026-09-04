@@ -14,8 +14,18 @@ const Database = require('./models/database');
 const GameHub = require('./realtime/gameHub');
 const gameRoutes = require('./routes/games');
 const scoreRoutes = require('./routes/scores');
+const authRoutes = require('./routes/auth');
 const { auth } = require('./middleware/auth');
 const { newSessionToken, hashToken } = require('./lib/token');
+const { hashPassword } = require('./lib/password');
+const { publicUser } = require('./lib/publicUser');
+
+// Login handle: letters, digits, `._-` only. No `:` — that keeps the
+// `guest:<uuid>` namespace used for typed-in (non-account) game players
+// (see gameController.js) provably unreachable by a real registration, and
+// no whitespace, which sidesteps homoglyph/trim tricks against the
+// case-insensitive uniqueness check.
+const USERNAME_RE = /^[A-Za-z0-9._-]{2,32}$/;
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +45,15 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const publicEndpointLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Login/set-password guess a secret rather than just mint an identity, so
+// they get a much tighter budget than account creation — 10/min/IP.
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -66,21 +85,41 @@ const onGameChanged = (gameId) => hub.reloadAndBroadcast(gameId);
 app.use('/api/games/code', publicEndpointLimiter); // unauthenticated code lookup
 app.use('/api/games', gameRoutes(db, onGameChanged));
 app.use('/api/scores', scoreRoutes(db, onGameChanged));
+app.use('/api/auth', authRoutes(db, hub, authLimiter));
 
-// Registration: mint a fresh anonymous identity + session token. The token is
-// returned once here and never again; only its hash is stored.
+// Registration: create an account with a username + password, and mint a
+// session token. The token is returned once here and never again; only its
+// hash is stored — same for the password, which is never stored at all,
+// only a salted scrypt derivation of it (lib/password.js).
 app.post('/api/users', publicEndpointLimiter, async (req, res) => {
   try {
     const username = (req.body.username || '').trim();
-    if (username.length < 2) {
-      return res.status(400).json({ error: 'Username must be at least 2 characters' });
+    const password = req.body.password || '';
+
+    if (!USERNAME_RE.test(username)) {
+      return res.status(400).json({
+        error: 'Username must be 2-32 characters: letters, numbers, "." "_" "-" only',
+      });
+    }
+    if (password.length < 8 || password.length > 128) {
+      return res.status(400).json({ error: 'Password must be 8-128 characters' });
     }
 
     const userId = uuidv4();
     const token = newSessionToken();
-    const user = await db.createUser(userId, username, username, hashToken(token));
+    const passwordHash = await hashPassword(password);
 
-    res.status(201).json({ ...user, sessionToken: token });
+    let user;
+    try {
+      user = await db.createUser(userId, username, username, hashToken(token), passwordHash);
+    } catch (err) {
+      if (/UNIQUE constraint failed: users\.username/i.test(err.message || '')) {
+        return res.status(409).json({ error: 'Username is already taken' });
+      }
+      throw err;
+    }
+
+    res.status(201).json({ ...publicUser({ ...user, password_hash: passwordHash }), sessionToken: token });
   } catch (error) {
     console.error('Error creating user:', error);
     res.status(500).json({ error: error.message || 'Failed to create user' });
@@ -97,7 +136,7 @@ app.patch('/api/users/me', auth(db), async (req, res) => {
 
     await db.updateUserDisplayName(req.userId, displayName.trim());
     const user = await db.getUserById(req.userId);
-    res.json(user);
+    res.json(publicUser(user));
   } catch (error) {
     console.error('Error updating user:', error);
     res.status(500).json({ error: error.message || 'Failed to update user' });

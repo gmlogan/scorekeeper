@@ -1,56 +1,137 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../hooks/useGame';
 
 export const Home = () => {
   const navigate = useNavigate();
+  const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSetUsername = async () => {
-    if (!username.trim()) return;
+  // A stored sessionToken may predate passwords entirely (a legacy account).
+  // Verify it against /auth/me rather than trusting localStorage blindly, so
+  // we know whether to offer that account a "set a password" prompt.
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [profile, setProfile] = useState(null);
+  const [claimPassword, setClaimPassword] = useState('');
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState('');
+  const [claimed, setClaimed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!localStorage.getItem('sessionToken')) {
+      setCheckingSession(false);
+      return undefined;
+    }
+    api
+      .get('/auth/me')
+      .then(({ data }) => {
+        if (!cancelled) setProfile(data);
+      })
+      .catch(() => {
+        // The 401 response interceptor already clears storage on failure;
+        // nothing else to do here.
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSubmit = async () => {
+    if (!username.trim() || !password) return;
 
     try {
       setLoading(true);
-
-      // Register: the server mints the id + session token.
-      const { data } = await api.post('/users', { username: username.trim() });
+      setError('');
+      const { data } = await api.post(mode === 'login' ? '/auth/login' : '/users', {
+        username: username.trim(),
+        password,
+      });
 
       localStorage.setItem('username', data.display_name || username.trim());
       localStorage.setItem('userId', data.id);
       localStorage.setItem('sessionToken', data.sessionToken);
       window.location.reload();
-    } catch (error) {
-      console.error('Failed to create user:', error);
-      alert('Failed to set username');
+    } catch (err) {
+      setError(
+        err.response?.data?.error || `Failed to ${mode === 'login' ? 'log in' : 'register'}`
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const handleClaim = async () => {
+    if (claimPassword.length < 8) {
+      setClaimError('Password must be at least 8 characters');
+      return;
+    }
+    try {
+      setClaiming(true);
+      setClaimError('');
+      await api.post('/auth/claim', { password: claimPassword });
+      setClaimed(true);
+    } catch (err) {
+      setClaimError(err.response?.data?.error || 'Failed to set password');
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const storedUsername = localStorage.getItem('username');
+
+  // Avoid a login-form flash while the stored token is still being verified.
+  if (checkingSession) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
 
   if (!storedUsername) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 pb-24">
         <div className="card max-w-md w-full">
-          <h1 className="text-2xl font-bold mb-2">Welcome to Scorekeeper</h1>
-          <p className="text-gray-600 mb-6">Enter your name to get started</p>
+          <h1 className="text-2xl font-bold mb-2">
+            {mode === 'login' ? 'Welcome back' : 'Welcome to Scorekeeper'}
+          </h1>
+          <p className="text-gray-600 mb-6">
+            {mode === 'login' ? 'Log in to your account' : 'Create an account to get started'}
+          </p>
           <input
             type="text"
-            placeholder="Your name"
+            placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="input-field mb-4"
-            onKeyPress={(e) => e.key === 'Enter' && handleSetUsername()}
+            className="input-field mb-3"
             disabled={loading}
+            autoComplete="username"
           />
-          <button
-            onClick={handleSetUsername}
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+            className="input-field mb-2"
             disabled={loading}
-            className="btn-primary w-full"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          />
+          {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+          <button onClick={handleSubmit} disabled={loading} className="btn-primary w-full mb-4">
+            {loading ? 'Please wait...' : mode === 'login' ? 'Log In' : 'Create Account'}
+          </button>
+          <button
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login');
+              setError('');
+            }}
+            className="text-sm text-gray-600 hover:text-gray-900 w-full text-center"
           >
-            {loading ? 'Setting up...' : 'Continue'}
+            {mode === 'login' ? "New here? Create an account" : 'Already have an account? Log in'}
           </button>
         </div>
       </div>
@@ -65,6 +146,33 @@ export const Home = () => {
         <h1 className="text-4xl font-bold text-gray-900">Welcome back, {storedUsername}</h1>
         <p className="text-gray-600 mt-2">Keep every point counted.</p>
       </div>
+
+      {profile && !profile.hasPassword && !claimed && (
+        <div className="px-6 pt-6 max-w-2xl mx-auto">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-3xl p-6">
+            <h3 className="font-bold mb-1">Set a password</h3>
+            <p className="text-gray-600 text-sm mb-4">
+              Your account doesn't have a password yet — set one so you can log back in from
+              another device.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                placeholder="New password"
+                value={claimPassword}
+                onChange={(e) => setClaimPassword(e.target.value)}
+                className="input-field flex-1"
+                disabled={claiming}
+                autoComplete="new-password"
+              />
+              <button onClick={handleClaim} disabled={claiming} className="btn-primary px-5">
+                {claiming ? '...' : 'Set'}
+              </button>
+            </div>
+            {claimError && <p className="text-red-600 text-sm mt-2">{claimError}</p>}
+          </div>
+        </div>
+      )}
 
       <div className="px-6 py-8 max-w-2xl mx-auto space-y-6">
         {/* Create Game Card */}

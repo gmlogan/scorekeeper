@@ -3,7 +3,9 @@ import request from 'supertest';
 import { app, db } from '../../backend/src/server.js';
 
 const createUser = async (username) => {
-  const response = await request(app).post('/api/users').send({ username });
+  const response = await request(app)
+    .post('/api/users')
+    .send({ username, password: 'test-password-1234' });
   expect(response.status).toBe(201);
   expect(response.body.sessionToken).toBeTruthy();
   return { id: response.body.id, sessionToken: response.body.sessionToken };

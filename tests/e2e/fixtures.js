@@ -22,7 +22,9 @@ const authHeaders = (user) => ({
 });
 
 const createUser = async (request, username) => {
-  const response = await request.post('/api/users', { data: { username } });
+  const response = await request.post('/api/users', {
+    data: { username, password: 'test-password-1234' },
+  });
   expect(response.ok()).toBeTruthy();
   const body = await response.json();
   return { id: body.id, username, sessionToken: body.sessionToken };

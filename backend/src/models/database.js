@@ -86,17 +86,89 @@ class Database {
       `);
       console.log('DB migration v1 applied (users.username no longer unique)');
     }
+
+    if (version < 2) {
+      // v2: add password_hash, and re-add UNIQUE on username (now
+      // case-insensitively, so "Dad" and "dad" can't be two accounts) —
+      // login needs a unique credential. `schema.sql` runs *before*
+      // `_migrate()` on every boot, so a bare `CREATE UNIQUE INDEX` here
+      // would already be too late: it would fire against un-deduped data on
+      // the very first boot after this ships and crash-loop the server.
+      // Rebuilding the table (as v1 did) sidesteps that — the constraint
+      // only ever lands transactionally, after the de-dupe below.
+      await this._exec(`
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+
+        -- De-dupe existing usernames (case-insensitively) before the new
+        -- UNIQUE constraint can be enforced. Renames losers by appending
+        -- their id — never DELETEs: games / game_players / score_history
+        -- all FK to users(id) ON DELETE CASCADE, and a delete here would
+        -- silently destroy that user's games and score history. Losing
+        -- rows keep insertion order (MIN(rowid)), so the earliest-created
+        -- account for a name keeps its original username.
+        UPDATE users
+           SET username = username || '#' || id
+         WHERE rowid NOT IN (SELECT MIN(rowid) FROM users GROUP BY lower(username));
+
+        CREATE TABLE users_v2 (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          display_name TEXT,
+          avatar_url TEXT,
+          password_hash TEXT,
+          session_token TEXT UNIQUE,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO users_v2 (id, username, display_name, avatar_url, password_hash, session_token, created_at, updated_at)
+          SELECT id, username, display_name, avatar_url, NULL, session_token, created_at, updated_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_v2 RENAME TO users;
+
+        PRAGMA user_version=2;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+      `);
+      console.log('DB migration v2 applied (users.username unique again, password_hash added)');
+    }
   }
 
   // User operations
-  createUser(id, username, displayName, sessionTokenHash = null) {
+  createUser(id, username, displayName, sessionTokenHash = null, passwordHash = null) {
     return new Promise((resolve, reject) => {
       this.db.run(
-        'INSERT INTO users (id, username, display_name, session_token) VALUES (?, ?, ?, ?)',
-        [id, username, displayName, sessionTokenHash],
+        'INSERT INTO users (id, username, display_name, session_token, password_hash) VALUES (?, ?, ?, ?, ?)',
+        [id, username, displayName, sessionTokenHash, passwordHash],
         (err) => {
           if (err) reject(err);
           else resolve({ id, username, display_name: displayName });
+        }
+      );
+    });
+  }
+
+  setUserPassword(userId, passwordHash) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [passwordHash, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        }
+      );
+    });
+  }
+
+  setUserSessionToken(userId, sessionTokenHash) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        'UPDATE users SET session_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [sessionTokenHash, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
         }
       );
     });
@@ -265,8 +337,11 @@ class Database {
 
   getGamePlayers(gameId) {
     return new Promise((resolve, reject) => {
+      // `u.username` is deliberately excluded: it's a login credential now,
+      // and the frontend only ever renders `display_name` — selecting it
+      // would broadcast every player's login handle to the whole roster.
       this.db.all(
-        `SELECT gp.*, u.username, u.display_name FROM game_players gp
+        `SELECT gp.*, u.display_name FROM game_players gp
          JOIN users u ON gp.player_id = u.id
          WHERE gp.game_id = ?
          ORDER BY gp.current_score DESC`,

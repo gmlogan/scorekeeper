@@ -11,6 +11,11 @@ RUN npm run build
 # Backend stage
 FROM node:22-alpine AS runtime
 
+# su-exec drops from root to the `node` user via execve (replacing PID 1, so
+# SIGTERM/graceful-shutdown semantics are unchanged) after the entrypoint's
+# one-time root setup step below.
+RUN apk add --no-cache su-exec
+
 WORKDIR /app
 
 # Copy backend code
@@ -23,9 +28,17 @@ COPY backend/ .
 COPY --from=build-frontend /app/frontend/dist ./public
 
 # Create database directory, owned by the unprivileged 'node' user (already
-# built into the base image) so the app doesn't run as root.
+# built into the base image) — matters when nothing is mounted over it
+# (e.g. `docker run` without the compose volume). When something IS mounted
+# there, this ownership is exactly what the mount shadows, which is what
+# docker-entrypoint.sh fixes up at container start.
 RUN mkdir -p /app/database && chown -R node:node /app
-USER node
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Stays root here — the entrypoint needs root to chown a freshly-mounted
+# volume, then drops to `node` itself before exec'ing the app.
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Expose port
 EXPOSE 5000

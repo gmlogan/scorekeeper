@@ -7,13 +7,12 @@ services:
       - "5000:5000"
     volumes:
       - ./backend/database:/app/database
+    # Single source of truth for app config — see backend/.env.example.
+    # (Compose's `environment:` would take precedence over this per-key, so
+    # NODE_ENV/PORT/FRONTEND_URL must NOT also be hardcoded there below.)
     env_file:
-      - path: ./backend/.env  # optional; only needs BREVO_API_KEY/BREVO_SENDER_EMAIL, see backend/.env.example
+      - path: ./backend/.env
         required: false
-    environment:
-      - NODE_ENV=production
-      - PORT=5000
-      - FRONTEND_URL=http://localhost
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/health"]

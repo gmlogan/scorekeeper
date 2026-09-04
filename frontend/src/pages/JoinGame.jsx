@@ -8,6 +8,8 @@ export const JoinGame = () => {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [needsTempName, setNeedsTempName] = useState(false);
+  const [tempName, setTempName] = useState('');
   const username = localStorage.getItem('username');
 
   useEffect(() => {
@@ -31,13 +33,22 @@ export const JoinGame = () => {
       setError('Please enter a valid game code');
       return;
     }
+    if (needsTempName && tempName.trim().length < 2) {
+      setError('Name must be at least 2 characters');
+      return;
+    }
 
     try {
       setLoading(true);
-      const result = await joinGame(code);
+      const result = await joinGame(code, needsTempName ? tempName.trim() : undefined);
       navigate(`/game/${result.game.id}`);
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to join game');
+      if (error.response?.data?.code === 'DUPLICATE_NAME') {
+        setNeedsTempName(true);
+        setError(error.response.data.error);
+      } else {
+        setError(error.response?.data?.error || 'Failed to join game');
+      }
     } finally {
       setLoading(false);
     }
@@ -84,6 +95,24 @@ export const JoinGame = () => {
             />
             {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
           </div>
+
+          {needsTempName && (
+            <div className="mb-8">
+              <h2 className="text-lg font-bold mb-2">Pick a name for this game</h2>
+              <p className="text-gray-600 mb-4 text-sm">
+                Someone in this game already goes by "{username}". Use a different name — just
+                for this game.
+              </p>
+              <input
+                type="text"
+                placeholder="Name for this game"
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleJoinGame()}
+                className="input-field"
+              />
+            </div>
+          )}
 
           {/* Join Button */}
           <button

@@ -132,17 +132,50 @@ class Database {
       `);
       console.log('DB migration v2 applied (users.username unique again, password_hash added)');
     }
+
+    if (version < 3) {
+      // v3: username -> email. Same column, same COLLATE NOCASE UNIQUE
+      // constraint (that's exactly what a unique login identifier needs) —
+      // just a rename, not a rebuild. Guest placeholder rows keep their
+      // `guest:<uuid>` value, which is never a valid email so it can never
+      // collide with a real registration.
+      await this._exec('ALTER TABLE users RENAME COLUMN username TO email');
+      await this._exec('PRAGMA user_version=3');
+      console.log('DB migration v3 applied (users.username renamed to email)');
+    }
+
+    if (version < 4) {
+      // v4: nullable reset-token columns for the forgot-password flow.
+      // Plain ADD COLUMN — no constraint, no rebuild needed.
+      await this._exec(`
+        ALTER TABLE users ADD COLUMN reset_token_hash TEXT;
+        ALTER TABLE users ADD COLUMN reset_token_expires_at DATETIME;
+        PRAGMA user_version=4;
+      `);
+      console.log('DB migration v4 applied (users reset_token columns added)');
+    }
+
+    if (version < 5) {
+      // v5: per-game display-name override, so a player whose display_name
+      // collides with someone already in the same game can use a temporary
+      // name scoped to just that game.
+      await this._exec(`
+        ALTER TABLE game_players ADD COLUMN display_name_override TEXT;
+        PRAGMA user_version=5;
+      `);
+      console.log('DB migration v5 applied (game_players.display_name_override added)');
+    }
   }
 
   // User operations
-  createUser(id, username, displayName, sessionTokenHash = null, passwordHash = null) {
+  createUser(id, email, displayName, sessionTokenHash = null, passwordHash = null) {
     return new Promise((resolve, reject) => {
       this.db.run(
-        'INSERT INTO users (id, username, display_name, session_token, password_hash) VALUES (?, ?, ?, ?, ?)',
-        [id, username, displayName, sessionTokenHash, passwordHash],
+        'INSERT INTO users (id, email, display_name, session_token, password_hash) VALUES (?, ?, ?, ?, ?)',
+        [id, email, displayName, sessionTokenHash, passwordHash],
         (err) => {
           if (err) reject(err);
-          else resolve({ id, username, display_name: displayName });
+          else resolve({ id, email, display_name: displayName });
         }
       );
     });
@@ -166,6 +199,47 @@ class Database {
       this.db.run(
         'UPDATE users SET session_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         [sessionTokenHash, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        }
+      );
+    });
+  }
+
+  setUserResetToken(userId, tokenHash, expiresAt) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        'UPDATE users SET reset_token_hash = ?, reset_token_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [tokenHash, expiresAt, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        }
+      );
+    });
+  }
+
+  // Only returns a row while the token is unexpired — an expired token
+  // should behave identically to an unknown one to the caller.
+  getUserByResetTokenHash(tokenHash) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        "SELECT * FROM users WHERE reset_token_hash = ? AND reset_token_expires_at > datetime('now')",
+        [tokenHash],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        }
+      );
+    });
+  }
+
+  clearUserResetToken(userId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        'UPDATE users SET reset_token_hash = NULL, reset_token_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [userId],
         function (err) {
           if (err) reject(err);
           else resolve(this.changes);
@@ -200,11 +274,11 @@ class Database {
     });
   }
 
-  getUserByUsername(username) {
+  getUserByEmail(email) {
     return new Promise((resolve, reject) => {
       this.db.get(
-        'SELECT * FROM users WHERE username = ?',
-        [username],
+        'SELECT * FROM users WHERE email = ?',
+        [email],
         (err, row) => {
           if (err) reject(err);
           else resolve(row);
@@ -322,11 +396,11 @@ class Database {
   }
 
   // Game player operations
-  addPlayerToGame(gamePlayerId, gameId, playerId) {
+  addPlayerToGame(gamePlayerId, gameId, playerId, displayNameOverride = null) {
     return new Promise((resolve, reject) => {
       this.db.run(
-        'INSERT INTO game_players (id, game_id, player_id, current_score) VALUES (?, ?, ?, 0)',
-        [gamePlayerId, gameId, playerId],
+        'INSERT INTO game_players (id, game_id, player_id, display_name_override, current_score) VALUES (?, ?, ?, ?, 0)',
+        [gamePlayerId, gameId, playerId, displayNameOverride],
         (err) => {
           if (err) reject(err);
           else resolve();
@@ -337,11 +411,14 @@ class Database {
 
   getGamePlayers(gameId) {
     return new Promise((resolve, reject) => {
-      // `u.username` is deliberately excluded: it's a login credential now,
+      // `u.email` is deliberately excluded: it's a login credential now,
       // and the frontend only ever renders `display_name` — selecting it
       // would broadcast every player's login handle to the whole roster.
+      // `display_name` resolves to this game's override when the player
+      // joined with a colliding name (see gameController.joinGame).
       this.db.all(
-        `SELECT gp.*, u.display_name FROM game_players gp
+        `SELECT gp.*, COALESCE(gp.display_name_override, u.display_name) AS display_name
+         FROM game_players gp
          JOIN users u ON gp.player_id = u.id
          WHERE gp.game_id = ?
          ORDER BY gp.current_score DESC`,

@@ -4,7 +4,7 @@
 // account to set one, without ever exposing the hash itself.
 const publicUser = (row) => ({
   id: row.id,
-  username: row.username,
+  email: row.email,
   display_name: row.display_name,
   avatar_url: row.avatar_url,
   hasPassword: Boolean(row.password_hash),

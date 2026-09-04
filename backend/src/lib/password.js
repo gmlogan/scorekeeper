@@ -54,4 +54,17 @@ const verifyPassword = async (password, stored) => {
   return crypto.timingSafeEqual(actual, expected);
 };
 
-module.exports = { hashPassword, verifyPassword };
+// Length bound (8-128) plus at least one letter, one digit, and one special
+// character. Returns an error string to show the user, or null if the
+// password is acceptable — callers just check truthiness.
+const passwordComplexityError = (password) => {
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+    return 'Password must be 8-128 characters';
+  }
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    return 'Password must mix letters, numbers, and special characters';
+  }
+  return null;
+};
+
+module.exports = { hashPassword, verifyPassword, passwordComplexityError };

@@ -15,7 +15,7 @@
     "build:backend": "cd backend && npm install --production",
     "build:frontend": "cd frontend && npm install && npm run build",
     "test": "npm run test:api && npm run test:e2e",
-    "test:api": "vitest run tests/api",
+    "test:api": "NODE_ENV=test vitest run tests/api",
     "test:e2e": "playwright test",
     "start": "node backend/src/server.js",
     "docker:build": "docker build -t scorekeeper .",

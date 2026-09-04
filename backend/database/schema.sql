@@ -1,17 +1,25 @@
 -- Database schema for Scorekeeper App
 
 -- Users table
--- `username` is the unique (case-insensitive) login handle. `display_name`
+-- `email` is the unique (case-insensitive) login identifier. `display_name`
 -- is a free-form, non-unique label — two people can both show as "Dad" in
 -- a game. `password_hash` is nullable: accounts created before login
 -- existed keep working on their existing session token until they set one.
+-- Typed-in "guest" players (added by a host, not real accounts) store a
+-- synthetic `guest:<uuid>` value here — never a valid email, so it can
+-- never collide with or be reachable by a real registration.
+-- `reset_token_hash`/`reset_token_expires_at` back the forgot-password flow
+-- (see backend/src/routes/auth.js) — nullable, only set while a reset is
+-- pending.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  email TEXT NOT NULL COLLATE NOCASE UNIQUE,
   display_name TEXT,
   avatar_url TEXT,
   password_hash TEXT,
   session_token TEXT UNIQUE,
+  reset_token_hash TEXT,
+  reset_token_expires_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -31,10 +39,14 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 -- Game players table
+-- `display_name_override` lets a player who joins with the same
+-- display_name as someone already in this game use a temporary name for
+-- just this game, without touching their account's real display_name.
 CREATE TABLE IF NOT EXISTS game_players (
   id TEXT PRIMARY KEY,
   game_id TEXT NOT NULL,
   player_id TEXT NOT NULL,
+  display_name_override TEXT,
   current_score INTEGER DEFAULT 0,
   joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,

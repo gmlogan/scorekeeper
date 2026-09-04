@@ -23,10 +23,13 @@ const authHeaders = (user) => ({
 
 const createUser = async (request, username) => {
   const response = await request.post('/api/users', {
-    data: { username, password: 'test-password-1234' },
+    data: { email: `${username}@example.com`, password: 'test-password-1234!' },
   });
   expect(response.ok()).toBeTruthy();
   const body = await response.json();
+  // `username` here is only this fixture's display label (see openGame,
+  // which writes it straight to localStorage) — unrelated to the account's
+  // real login email above.
   return { id: body.id, username, sessionToken: body.sessionToken };
 };
 

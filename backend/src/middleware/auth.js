@@ -46,17 +46,8 @@ const validateGameName = (req, res, next) => {
   next();
 };
 
-const validateUsername = (req, res, next) => {
-  const username = req.body.username;
-  if (!username || username.trim().length < 2) {
-    return res.status(400).json({ error: 'Username must be at least 2 characters' });
-  }
-  next();
-};
-
 module.exports = {
   auth,
   validateGameCode,
   validateGameName,
-  validateUsername
 };

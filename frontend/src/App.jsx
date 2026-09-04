@@ -8,6 +8,8 @@ import { CreateGame } from './pages/CreateGame';
 import { JoinGame } from './pages/JoinGame';
 import { GameBoard } from './pages/GameBoard';
 import { ActiveGames } from './pages/ActiveGames';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
 import './index.css';
 
 function App() {
@@ -20,6 +22,8 @@ function App() {
           {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/create" element={<CreateGame />} />
             <Route path="/join" element={<JoinGame />} />
             <Route path="/games" element={<ActiveGames />} />

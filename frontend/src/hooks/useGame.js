@@ -69,10 +69,10 @@ export const useGameAPI = () => {
   );
 
   const joinGame = useCallback(
-    async (code) => {
+    async (code, tempDisplayName) => {
       try {
         setLoading(true);
-        const response = await api.post('/games/join', { code });
+        const response = await api.post('/games/join', { code, tempDisplayName });
         setGame(response.data.game);
         setPlayers(response.data.players);
         localStorage.setItem('userId', response.data.userId);

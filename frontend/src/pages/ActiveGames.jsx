@@ -35,6 +35,9 @@ export const ActiveGames = () => {
   );
   const [savingName, setSavingName] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [profileEmail, setProfileEmail] = useState(null);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const loadGames = async () => {
     try {
@@ -55,6 +58,14 @@ export const ActiveGames = () => {
   useEffect(() => {
     setShowSettings(searchParams.get('settings') === 'open');
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!showSettings || profileEmail) return;
+    api
+      .get('/auth/me')
+      .then(({ data }) => setProfileEmail(data.email))
+      .catch(() => {});
+  }, [showSettings, profileEmail]);
 
   const closeSettings = () => {
     setShowSettings(false);
@@ -81,6 +92,22 @@ export const ActiveGames = () => {
       alert('Failed to update display name');
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!profileEmail) return;
+    try {
+      setResettingPassword(true);
+      // Reuses the same public forgot-password endpoint the login screen
+      // uses — no separate authed "change password" code path needed.
+      await api.post('/auth/forgot-password', { email: profileEmail });
+      setResetSent(true);
+    } catch (error) {
+      console.error('Failed to request password reset:', error);
+      alert('Failed to send reset email');
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -240,6 +267,17 @@ export const ActiveGames = () => {
             </div>
 
             <div className="border-t border-gray-200 pt-6 mb-6">
+              <button
+                onClick={handleResetPassword}
+                disabled={resettingPassword || resetSent || !profileEmail}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-full transition-all disabled:opacity-50 mb-3"
+              >
+                {resetSent
+                  ? 'Reset link sent — check your email'
+                  : resettingPassword
+                    ? 'Sending...'
+                    : 'Reset password'}
+              </button>
               <button
                 onClick={handleLogout}
                 className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-full transition-all"

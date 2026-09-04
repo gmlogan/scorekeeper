@@ -52,13 +52,12 @@ class GameController {
       await this.db.addPlayerToGame(hostGamePlayerId, gameId, hostId);
 
       // Add other players if provided. These are typed-in names, not
-      // accounts — give each a non-colliding `guest:<uuid>` username (never
-      // a real login handle, so it can never be logged into) and put the
-      // typed name in display_name, which is all the UI ever renders. Now
-      // that usernames are login credentials, looking one up by the typed
-      // name (as this used to, on insert conflict) would silently attach a
-      // real stranger's account to this game whenever a typed name happened
-      // to match their handle.
+      // accounts — give each a non-colliding `guest:<uuid>` email (never a
+      // real email, so it can never be logged into) and put the typed name
+      // in display_name, which is all the UI ever renders. Emails are login
+      // credentials, so looking one up by the typed name (as this used to,
+      // on insert conflict) would silently attach a real stranger's account
+      // to this game whenever a typed name happened to match their email.
       if (players && Array.isArray(players)) {
         for (const playerName of players) {
           const playerId = uuidv4();
@@ -83,6 +82,7 @@ class GameController {
   async joinGame(req, res) {
     try {
       const { code } = req.body;
+      const tempDisplayName = (req.body.tempDisplayName || '').trim();
       const userId = req.userId; // authenticated
 
       if (!code) {
@@ -97,7 +97,31 @@ class GameController {
       // Add the authenticated user to the game (idempotent — re-joining is fine).
       const roster = await this.db.getGamePlayers(game.id);
       if (!roster.some((p) => p.player_id === userId)) {
-        await this.db.addPlayerToGame(uuidv4(), game.id, userId);
+        const collidesWithRoster = (name) =>
+          roster.some((p) => (p.display_name || '').trim().toLowerCase() === name.toLowerCase());
+
+        if (tempDisplayName) {
+          if (tempDisplayName.length < 2) {
+            return res.status(400).json({ error: 'Name must be at least 2 characters' });
+          }
+          if (collidesWithRoster(tempDisplayName)) {
+            return res.status(409).json({
+              error: 'That name is already used in this game too — try another',
+              code: 'DUPLICATE_NAME',
+            });
+          }
+        } else {
+          const user = await this.db.getUserById(userId);
+          const realName = (user.display_name || '').trim();
+          if (collidesWithRoster(realName)) {
+            return res.status(409).json({
+              error: 'That name is already used in this game',
+              code: 'DUPLICATE_NAME',
+            });
+          }
+        }
+
+        await this.db.addPlayerToGame(uuidv4(), game.id, userId, tempDisplayName || null);
       }
 
       const gamePlayers = await this.db.getGamePlayers(game.id);

@@ -7,6 +7,9 @@ services:
       - "5000:5000"
     volumes:
       - ./backend/database:/app/database
+    env_file:
+      - path: ./backend/.env  # optional; only needs BREVO_API_KEY/BREVO_SENDER_EMAIL, see backend/.env.example
+        required: false
     environment:
       - NODE_ENV=production
       - PORT=5000

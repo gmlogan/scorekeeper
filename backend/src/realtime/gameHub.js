@@ -67,7 +67,7 @@ class GameHub {
         loaded: false,
         version: 0,
         game: null,
-        players: new Map(), // playerId -> { player_id, display_name, username, current_score }
+        players: new Map(), // playerId -> { player_id, display_name, current_score }
         history: new Map(), // playerId -> [entry]
         sockets: new Set(),
         pending: [], // score changes accumulated since the last flush
@@ -107,7 +107,6 @@ class GameHub {
         nextPlayers.set(p.player_id, {
           player_id: p.player_id,
           display_name: p.display_name,
-          username: p.username,
           current_score: p.current_score,
         });
         const rows = await this.db.getScoreHistory(game.id, p.player_id, HISTORY_LIMIT);
@@ -274,6 +273,19 @@ class GameHub {
 
     await this.hydrate(room, game);
     this.broadcastSnapshot(room);
+  }
+
+  // Terminate every currently-open socket authenticated as `userId`. `ws.userId`
+  // is verified once at connect and cached for the socket's lifetime — REST
+  // re-checks the bearer token on every request, but a WebSocket doesn't, so
+  // without this an old device keeps live score-write access after its token
+  // is invalidated (login elsewhere, logout) until the socket happens to drop
+  // on its own. Called right after a token rotation/clear.
+  closeSocketsForUser(userId) {
+    if (!this.wss) return;
+    for (const ws of this.wss.clients) {
+      if (ws.userId === userId) ws.terminate();
+    }
   }
 
   // ---- connection & message handling -------------------------------

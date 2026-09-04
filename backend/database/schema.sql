@@ -1,14 +1,16 @@
 -- Database schema for Scorekeeper App
 
 -- Users table
--- `username` is NOT globally unique: identity is the server-issued session
--- token (stored hashed in `session_token`), and the name is just a display
--- label, so two people can both be "Dad" in different games.
+-- `username` is the unique (case-insensitive) login handle. `display_name`
+-- is a free-form, non-unique label — two people can both show as "Dad" in
+-- a game. `password_hash` is nullable: accounts created before login
+-- existed keep working on their existing session token until they set one.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  username TEXT NOT NULL,
+  username TEXT NOT NULL COLLATE NOCASE UNIQUE,
   display_name TEXT,
   avatar_url TEXT,
+  password_hash TEXT,
   session_token TEXT UNIQUE,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

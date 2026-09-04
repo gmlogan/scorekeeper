@@ -51,22 +51,19 @@ class GameController {
       const hostGamePlayerId = uuidv4();
       await this.db.addPlayerToGame(hostGamePlayerId, gameId, hostId);
 
-      // Add other players if provided
+      // Add other players if provided. These are typed-in names, not
+      // accounts — give each a non-colliding `guest:<uuid>` username (never
+      // a real login handle, so it can never be logged into) and put the
+      // typed name in display_name, which is all the UI ever renders. Now
+      // that usernames are login credentials, looking one up by the typed
+      // name (as this used to, on insert conflict) would silently attach a
+      // real stranger's account to this game whenever a typed name happened
+      // to match their handle.
       if (players && Array.isArray(players)) {
         for (const playerName of players) {
           const playerId = uuidv4();
-          try {
-            await this.db.createUser(playerId, playerName, playerName);
-            const playerGamePlayerId = uuidv4();
-            await this.db.addPlayerToGame(playerGamePlayerId, gameId, playerId);
-          } catch (err) {
-            // User might already exist
-            const existingUser = await this.db.getUserByUsername(playerName);
-            if (existingUser) {
-              const playerGamePlayerId = uuidv4();
-              await this.db.addPlayerToGame(playerGamePlayerId, gameId, existingUser.id);
-            }
-          }
+          await this.db.createUser(playerId, `guest:${playerId}`, playerName);
+          await this.db.addPlayerToGame(uuidv4(), gameId, playerId);
         }
       }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useGameAPI } from '../hooks/useGame';
+import { useGameAPI, api } from '../hooks/useGame';
 
 const formatDate = (value) => {
   if (!value) return '';
@@ -81,6 +81,21 @@ export const ActiveGames = () => {
       alert('Failed to update display name');
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch (error) {
+      console.error('Logout request failed:', error);
+      // Clear locally regardless — the point is this browser stops acting
+      // as this user even if the server call itself didn't land.
+    } finally {
+      localStorage.removeItem('sessionToken');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      window.location.href = '/';
     }
   };
 
@@ -221,6 +236,15 @@ export const ActiveGames = () => {
                 className="btn-primary px-5"
               >
                 {savingName ? '...' : 'Save'}
+              </button>
+            </div>
+
+            <div className="border-t border-gray-200 pt-6 mb-6">
+              <button
+                onClick={handleLogout}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-full transition-all"
+              >
+                Log Out
               </button>
             </div>
 

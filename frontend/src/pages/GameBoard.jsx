@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
 import { useGame } from '../context/GameContext';
 import { copyText } from '../lib/clipboard';
+import { AuthForm } from '../components/AuthForm';
 import {
   saveGameSnapshot,
   loadGameSnapshot,
@@ -37,6 +38,7 @@ export const GameBoard = () => {
   // Last few score entries per player, seeded and kept live by `game:state`.
   const [historyByPlayer, setHistoryByPlayer] = useState({});
   const [loading, setLoading] = useState(true);
+  const [showSyncForm, setShowSyncForm] = useState(false);
   const userId = localStorage.getItem('userId');
   const scoreRequestIdRef = useRef(0);
   // Version of the last `game:state` frame we applied; frames that aren't
@@ -352,6 +354,32 @@ export const GameBoard = () => {
         <div className="px-6 py-2 text-center text-xs font-semibold bg-blue-50 text-blue-700">
           📡 Offline — changes are saved on this device and will sync once
           you're back online.
+        </div>
+      )}
+
+      {/* Back online but this game was started as a guest, with no account
+          to sync it to yet — the reconnect-triggered flush is deliberately
+          on hold for it (see offlineSync.js) until this happens. Shown
+          inline (not a navigate to Home) so this page stays mounted through
+          the login's reload and its own listener below catches the sync. */}
+      {isConnected && isLocalGame && localStorage.getItem('guestMode') === 'true' && !showSyncForm && (
+        <div className="px-6 py-2 flex items-center justify-center gap-3 text-xs font-semibold bg-blue-50 text-blue-700">
+          <span>You're back online — log in to sync this game.</span>
+          <button onClick={() => setShowSyncForm(true)} className="underline">
+            Log in
+          </button>
+        </div>
+      )}
+
+      {showSyncForm && (
+        <div className="px-6 py-6 max-w-md mx-auto">
+          <div className="card">
+            <AuthForm
+              title="Sync your game"
+              subtitle="Log in or create an account to save what you've played so far."
+              onCancel={() => setShowSyncForm(false)}
+            />
+          </div>
         </div>
       )}
 

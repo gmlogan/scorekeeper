@@ -35,11 +35,14 @@ export const CreateGame = () => {
       return;
     }
 
-    // No connection: create it locally and defer the real POST until we're
-    // back online (see GameContext's flushQueue). There's no server yet to
-    // hand out a code, so skip straight to the game screen instead of the
-    // code-reveal step — GameBoard shows "pending" there until it syncs.
-    if (!isConnected) {
+    // No connection, or no account yet (a guest session — see Home.jsx —
+    // has no sessionToken even once reconnected): create it locally and
+    // defer the real POST until there's both a connection and a login (see
+    // GameContext's flushQueue and offlineSync.js's create-game guard).
+    // There's no server yet to hand out a code, so skip straight to the game
+    // screen instead of the code-reveal step — GameBoard shows "pending"
+    // there until it syncs.
+    if (!isConnected || !localStorage.getItem('sessionToken')) {
       const localId = `local-${crypto.randomUUID()}`;
       const hostId = localStorage.getItem('userId');
       const hostName = localStorage.getItem('username') || 'You';

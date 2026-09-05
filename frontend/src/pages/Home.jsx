@@ -1,26 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../hooks/useGame';
-
-// Mirrors backend/src/lib/password.js's passwordComplexityError — shown as
-// inline help so a weak password is caught before submit, not only on a
-// 400 after.
-const PASSWORD_HINT = 'At least 8 characters, mixing letters, numbers, and special characters';
-const isComplexPassword = (password) =>
-  password.length >= 8 &&
-  password.length <= 128 &&
-  /[A-Za-z]/.test(password) &&
-  /[0-9]/.test(password) &&
-  /[^A-Za-z0-9]/.test(password);
+import { useGame } from '../context/GameContext';
+import { AuthForm } from '../components/AuthForm';
 
 export const Home = () => {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { isConnected } = useGame();
+  const [guestName, setGuestName] = useState('');
+  const [guestError, setGuestError] = useState('');
+  // Set when a guest (see handleContinueAsGuest) asks to log in and sync —
+  // shows the auth form on top of an existing guest session instead of the
+  // normal signed-in home screen.
+  const [showAuthForm, setShowAuthForm] = useState(false);
 
   // A stored sessionToken may predate passwords entirely (a legacy account).
   // Verify it against /auth/me rather than trusting localStorage blindly, so
@@ -55,39 +47,19 @@ export const Home = () => {
     };
   }, []);
 
-  const handleSubmit = async () => {
-    if (!email.trim() || !password) return;
-
-    if (mode === 'register') {
-      if (password !== confirmPassword) {
-        setError('Passwords do not match');
-        return;
-      }
-      if (!isComplexPassword(password)) {
-        setError(PASSWORD_HINT);
-        return;
-      }
+  // No account, no network to make one with: play entirely locally under a
+  // client-side id (see CreateGame.jsx's offline path) until this device is
+  // both online and logged in.
+  const handleContinueAsGuest = () => {
+    const trimmed = guestName.trim();
+    if (trimmed.length < 2) {
+      setGuestError('Name must be at least 2 characters');
+      return;
     }
-
-    try {
-      setLoading(true);
-      setError('');
-      const { data } = await api.post(mode === 'login' ? '/auth/login' : '/users', {
-        email: email.trim(),
-        password,
-      });
-
-      localStorage.setItem('username', data.display_name || email.trim());
-      localStorage.setItem('userId', data.id);
-      localStorage.setItem('sessionToken', data.sessionToken);
-      window.location.reload();
-    } catch (err) {
-      setError(
-        err.response?.data?.error || `Failed to ${mode === 'login' ? 'log in' : 'register'}`
-      );
-    } finally {
-      setLoading(false);
-    }
+    localStorage.setItem('username', trimmed);
+    localStorage.setItem('userId', `local-user-${crypto.randomUUID()}`);
+    localStorage.setItem('guestMode', 'true');
+    window.location.reload();
   };
 
   const handleClaim = async () => {
@@ -108,77 +80,47 @@ export const Home = () => {
   };
 
   const storedUsername = localStorage.getItem('username');
+  const guestMode = localStorage.getItem('guestMode') === 'true';
+  const isSyncPrompt = Boolean(storedUsername) && showAuthForm;
 
   // Avoid a login-form flash while the stored token is still being verified.
   if (checkingSession) {
     return <div className="min-h-screen bg-gray-50" />;
   }
 
-  if (!storedUsername) {
+  if (!storedUsername || showAuthForm) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 pb-24">
         <div className="card max-w-md w-full">
-          <h1 className="text-2xl font-bold mb-2">
-            {mode === 'login' ? 'Welcome back' : 'Welcome to Scorekeeper'}
-          </h1>
-          <p className="text-gray-600 mb-6">
-            {mode === 'login' ? 'Log in to your account' : 'Create an account to get started'}
-          </p>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="input-field mb-3"
-            disabled={loading}
-            autoComplete="email"
+          <AuthForm
+            title={isSyncPrompt ? 'Sync your game' : 'Welcome back'}
+            subtitle={
+              isSyncPrompt
+                ? "Log in or create an account to save what you've played so far."
+                : 'Log in to your account, or create one to get started.'
+            }
+            onCancel={isSyncPrompt ? () => setShowAuthForm(false) : undefined}
           />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && mode === 'login' && handleSubmit()}
-            className="input-field mb-2"
-            disabled={loading}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-          />
-          {mode === 'register' && (
-            <>
+
+          {!storedUsername && !isConnected && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-sm text-gray-600 mb-3">
+                No connection yet? Play locally and sync once you're back online.
+              </p>
               <input
-                type="password"
-                placeholder="Confirm password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+                type="text"
+                placeholder="Your name"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleContinueAsGuest()}
                 className="input-field mb-2"
-                disabled={loading}
-                autoComplete="new-password"
               />
-              <p className="text-gray-500 text-xs mb-2">{PASSWORD_HINT}</p>
-            </>
+              {guestError && <p className="text-red-600 text-sm mb-2">{guestError}</p>}
+              <button onClick={handleContinueAsGuest} className="btn-secondary w-full">
+                Continue offline as guest
+              </button>
+            </div>
           )}
-          {mode === 'login' && (
-            <button
-              onClick={() => navigate('/forgot-password')}
-              className="text-sm text-gray-600 hover:text-gray-900 block mb-4"
-            >
-              Forgot password?
-            </button>
-          )}
-          {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-          <button onClick={handleSubmit} disabled={loading} className="btn-primary w-full mb-4">
-            {loading ? 'Please wait...' : mode === 'login' ? 'Log In' : 'Create Account'}
-          </button>
-          <button
-            onClick={() => {
-              setMode(mode === 'login' ? 'register' : 'login');
-              setError('');
-            }}
-            className="text-sm text-gray-600 hover:text-gray-900 w-full text-center"
-          >
-            {mode === 'login' ? "New here? Create an account" : 'Already have an account? Log in'}
-          </button>
         </div>
       </div>
     );
@@ -192,6 +134,17 @@ export const Home = () => {
         <h1 className="text-4xl font-bold text-gray-900">Welcome back, {storedUsername}</h1>
         <p className="text-gray-600 mt-2">Keep every point counted.</p>
       </div>
+
+      {guestMode && isConnected && (
+        <div className="px-6 pt-6 max-w-2xl mx-auto">
+          <div className="bg-blue-50 border border-blue-200 rounded-3xl p-6 flex items-center justify-between gap-4">
+            <p className="text-gray-700 text-sm">You're back online — log in to sync your game.</p>
+            <button onClick={() => setShowAuthForm(true)} className="btn-primary shrink-0 px-4 py-2">
+              Log in
+            </button>
+          </div>
+        </div>
+      )}
 
       {profile && !profile.hasPassword && !claimed && (
         <div className="px-6 pt-6 max-w-2xl mx-auto">
@@ -241,10 +194,15 @@ export const Home = () => {
           </div>
         </div>
 
-        {/* Join Game Card */}
+        {/* Join Game Card — needs a live code lookup, no offline path exists (see offlineSync.js) */}
         <div
-          onClick={() => navigate('/join')}
-          className="bg-gray-100 rounded-3xl p-6 cursor-pointer hover:bg-gray-200 transition-all"
+          onClick={() => isConnected && navigate('/join')}
+          aria-disabled={!isConnected}
+          className={`rounded-3xl p-6 transition-all ${
+            isConnected
+              ? 'bg-gray-100 cursor-pointer hover:bg-gray-200'
+              : 'bg-gray-50 cursor-not-allowed opacity-60'
+          }`}
         >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center">
@@ -254,7 +212,9 @@ export const Home = () => {
             </div>
             <div className="flex-1">
               <h3 className="font-bold text-lg">Join Existing Scoreboard</h3>
-              <p className="text-gray-600">Enter a game code from your host.</p>
+              <p className="text-gray-600">
+                {isConnected ? 'Enter a game code from your host.' : 'Needs a connection.'}
+              </p>
             </div>
             <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

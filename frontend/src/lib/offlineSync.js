@@ -73,10 +73,48 @@ const remapQueueGameId = (fromId, toId) => {
   if (changed) saveQueue(queue);
 };
 
+// A guest session (see Home.jsx) fabricates a client-side host id that has
+// no relation to whatever real account eventually logs in to sync — score
+// changes queued against that fake id would silently stop matching any
+// player in the now-real game. Typed-in guest players get a similar
+// throwaway id (see CreateGame.jsx). Rewrite both, using the local
+// snapshot as the only record of "which locally-saved player is this" —
+// the host maps 1:1, guests by display_name (unique within one game's
+// typed-in roster; CreateGame.jsx already rejects duplicates on entry).
+const remapQueuePlayerIds = (gameId, localPlayers, realGame) => {
+  if (!localPlayers?.length) return;
+  const idMap = new Map();
+  const localHost = localPlayers.find((p) => !p.is_guest);
+  if (localHost) idMap.set(localHost.player_id, realGame.host_id);
+  for (const lp of localPlayers.filter((p) => p.is_guest)) {
+    const real = realGame.players.find((p) => p.is_guest && p.display_name === lp.display_name);
+    if (real) idMap.set(lp.player_id, real.player_id);
+  }
+  if (!idMap.size) return;
+
+  const queue = loadQueue();
+  let changed = false;
+  for (const op of queue) {
+    if (op.payload && op.payload.gameId === gameId && idMap.has(op.payload.playerId)) {
+      op.payload.playerId = idMap.get(op.payload.playerId);
+      changed = true;
+    }
+  }
+  if (changed) saveQueue(queue);
+};
+
 export const hasQueuedOps = () => loadQueue().length > 0;
 
 const applyOp = async (op, { emitScoreChange }) => {
   if (op.type === 'create-game') {
+    // A guest session (see Home.jsx) has no account yet — posting without a
+    // token would 401, and a 401 is a permanent rejection below, which would
+    // drop this game forever the instant the device reconnects. Wait for the
+    // guest to actually log in instead; the next flush (triggered by the
+    // reload login does) will have a real token.
+    if (!localStorage.getItem('sessionToken')) {
+      throw new Error('not-authenticated');
+    }
     try {
       const { name, players, targetScore, timeLimit } = op.payload;
       const res = await api.post('/games', { name, players, targetScore, timeLimit });
@@ -127,7 +165,13 @@ export const flushQueue = async ({ emitScoreChange, onGameCreated, onOpDropped }
       }
 
       if (outcome.kind === 'created') {
+        // Read before onGameCreated fires — its listener (GameBoard) deletes
+        // this snapshot synchronously once notified.
+        const localSnapshot = loadGameSnapshot(op.payload.localId);
         remapQueueGameId(op.payload.localId, outcome.game.id);
+        if (localSnapshot?.players) {
+          remapQueuePlayerIds(outcome.game.id, localSnapshot.players, outcome.game);
+        }
         onGameCreated?.(op.payload.localId, outcome.game);
       } else if (outcome.kind === 'drop' && outcome.error) {
         onOpDropped?.(op, outcome.error);

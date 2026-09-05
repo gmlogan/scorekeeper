@@ -431,7 +431,8 @@ class Database {
       // `display_name` resolves to this game's override when the player
       // joined with a colliding name (see gameController.joinGame).
       this.db.all(
-        `SELECT gp.*, COALESCE(gp.display_name_override, u.display_name) AS display_name
+        `SELECT gp.*, COALESCE(gp.display_name_override, u.display_name) AS display_name,
+                CASE WHEN u.email LIKE 'guest:%' THEN 1 ELSE 0 END AS is_guest
          FROM game_players gp
          JOIN users u ON gp.player_id = u.id
          WHERE gp.game_id = ?

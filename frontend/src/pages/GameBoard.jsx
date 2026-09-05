@@ -278,6 +278,8 @@ export const GameBoard = () => {
 
   const isHost = gameData?.host_id === userId;
   const isOwnScore = selectedPlayer?.player_id === userId;
+  const isManagingGuest = isHost && !!selectedPlayer?.is_guest;
+  const canEditSelected = isOwnScore || isManagingGuest;
 
   const changeStatus = async (next) => {
     const prompts = {
@@ -415,6 +417,8 @@ export const GameBoard = () => {
             <h2 className="text-xl font-bold mb-4">
               {isOwnScore
                 ? 'Update your score'
+                : isManagingGuest
+                ? `${selectedPlayer.display_name}'s score (guest — you're managing this)`
                 : `${selectedPlayer.display_name}'s score`}
             </h2>
 
@@ -426,8 +430,8 @@ export const GameBoard = () => {
               </p>
             </div>
 
-            {/* Score adjustment — only the owner of this score, and only while the game is active */}
-            {isOwnScore && !isLocked && (
+            {/* Score adjustment — the owner, or the host managing a guest, while the game is active */}
+            {canEditSelected && !isLocked && (
               <div className="flex gap-2">
                 <button
                   onClick={() => applyDelta(-1)}
@@ -450,7 +454,7 @@ export const GameBoard = () => {
                 </button>
               </div>
             )}
-            {isOwnScore && isLocked && (
+            {canEditSelected && isLocked && (
               <p className="text-sm text-gray-500 bg-gray-100 rounded-xl px-4 py-3 text-center">
                 {isFinished
                   ? 'The game has ended. Scores can no longer be changed.'

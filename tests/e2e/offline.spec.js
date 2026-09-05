@@ -61,6 +61,12 @@ test('create a game, add a guest, and track scores fully offline, then sync', as
   await expect(page.getByText(/pending — syncing/)).toBeVisible();
   await expect(page.getByText('Guest One')).toBeVisible();
 
+  // The host can manage the guest's score even before the game has synced —
+  // the locally-created guest row must carry is_guest itself, not rely on
+  // the backend-computed value that only shows up after the real sync.
+  await page.getByText('Guest One').click();
+  await expect(page.getByRole('button', { name: '+' })).toBeVisible();
+
   // Score a few points for the host while offline.
   await page.getByText('(You)').click();
   const plus = page.getByRole('button', { name: '+' });

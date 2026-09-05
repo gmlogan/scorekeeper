@@ -67,7 +67,7 @@ class GameHub {
         loaded: false,
         version: 0,
         game: null,
-        players: new Map(), // playerId -> { player_id, display_name, current_score }
+        players: new Map(), // playerId -> { player_id, display_name, current_score, is_guest }
         history: new Map(), // playerId -> [entry]
         sockets: new Set(),
         pending: [], // score changes accumulated since the last flush
@@ -108,6 +108,7 @@ class GameHub {
           player_id: p.player_id,
           display_name: p.display_name,
           current_score: p.current_score,
+          is_guest: !!p.is_guest,
         });
         const rows = await this.db.getScoreHistory(game.id, p.player_id, HISTORY_LIMIT);
         nextHistory.set(

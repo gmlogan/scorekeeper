@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { flushQueue } from '../lib/offlineSync';
 
 const GameContext = createContext();
 
@@ -68,10 +70,38 @@ const gameReducer = (state, action) => {
 
 export const GameProvider = ({ children }) => {
   const [state, dispatch] = useReducer(gameReducer, initialState);
+  // Lifted here (rather than inside GameBoard) so the connection — and the
+  // `isConnected` signal offline support relies on — persists across route
+  // changes, matching the hook's own "kept alive across route changes" intent.
+  const ws = useWebSocket();
+
+  // Replay the offline outbox the moment we (re)connect, including the very
+  // first connection of a session — a queue can be left over from a
+  // previous session that ended while offline.
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    const wasConnected = wasConnectedRef.current;
+    wasConnectedRef.current = ws.isConnected;
+    if (!ws.isConnected || wasConnected) return;
+
+    flushQueue({
+      emitScoreChange: ws.emitScoreChange,
+      onGameCreated: (localId, game) => {
+        window.dispatchEvent(
+          new CustomEvent('offlinesync:gamecreated', { detail: { localId, game } })
+        );
+      },
+      onOpDropped: (op, error) => {
+        console.warn('Dropped a queued offline change:', op.type, error);
+        window.dispatchEvent(new CustomEvent('offlinesync:opdropped', { detail: { op, error } }));
+      },
+    });
+  }, [ws.isConnected]);
 
   const value = {
     state,
     dispatch,
+    ...ws,
     setUser: (user) => dispatch({ type: 'SET_USER', payload: user }),
     setGame: (game) => dispatch({ type: 'SET_GAME', payload: game }),
     setPlayers: (players) => dispatch({ type: 'SET_PLAYERS', payload: players }),

@@ -155,9 +155,12 @@ export const useWebSocket = () => {
   );
 
   // Resolves with the server ack: { ok: true, newScore, previousScore }
-  // or { ok: false, error }.
+  // or { ok: false, error }. `clientOpId`, when passed, makes the change
+  // idempotent server-side — pass one when this call might be a replay of an
+  // offline-queued change (see lib/offlineSync.js) so a retried send after a
+  // dropped ack can't double-apply.
   const emitScoreChange = useCallback(
-    (gameId, playerId, changeAmount) => {
+    (gameId, playerId, changeAmount, clientOpId) => {
       return new Promise((resolve) => {
         const reqId = `r${(reqSeqRef.current += 1)}`;
         const timer = setTimeout(() => {
@@ -165,7 +168,7 @@ export const useWebSocket = () => {
           resolve({ ok: false, error: 'Timed out waiting for the server' });
         }, ACK_TIMEOUT_MS);
         acksRef.current.set(reqId, { resolve, timer });
-        send({ type: 'score:change', gameId, playerId, changeAmount, reqId });
+        send({ type: 'score:change', gameId, playerId, changeAmount, reqId, clientOpId });
       });
     },
     [send]

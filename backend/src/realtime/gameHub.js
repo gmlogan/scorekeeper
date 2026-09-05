@@ -212,7 +212,7 @@ class GameHub {
   // Shared by the WS `score:change` handler. Validates against in-memory
   // game meta (no DB read for status/host), writes through to SQLite, then
   // updates memory from the authoritative result and queues a patch.
-  async applyScoreChange({ gameId, playerId, changeAmount, userId }) {
+  async applyScoreChange({ gameId, playerId, changeAmount, userId, clientOpId }) {
     const room = await this.loadRoom(gameId);
     if (!room) throw new ScoreError('Game not found', 404);
 
@@ -234,7 +234,7 @@ class GameHub {
 
     let result;
     try {
-      result = await this.db.changePlayerScore(gameId, playerId, changeAmount, userId);
+      result = await this.db.changePlayerScore(gameId, playerId, changeAmount, userId, clientOpId);
     } catch (err) {
       if (err.message === 'Score cannot be negative') throw new ScoreError(err.message, 400);
       if (err.message === 'Player not in game') throw new ScoreError(err.message, 404);
@@ -408,7 +408,7 @@ class GameHub {
     }
   }
 
-  async onScoreMessage(ws, { gameId, playerId, changeAmount, reqId }) {
+  async onScoreMessage(ws, { gameId, playerId, changeAmount, reqId, clientOpId }) {
     const respond = (payload) => this.send(ws, { type: 'ack', reqId, ...payload });
     if (!ws.userId) {
       return respond({ ok: false, error: 'Unauthorized' });
@@ -419,6 +419,7 @@ class GameHub {
         playerId,
         changeAmount,
         userId: ws.userId,
+        clientOpId,
       });
       respond({
         ok: true,

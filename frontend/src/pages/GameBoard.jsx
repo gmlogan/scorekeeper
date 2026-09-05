@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useGame } from '../context/GameContext';
 import { copyText } from '../lib/clipboard';
+import {
+  saveGameSnapshot,
+  loadGameSnapshot,
+  deleteGameSnapshot,
+  enqueueOp,
+} from '../lib/offlineSync';
+
+// A game created while offline gets a client-side id until the deferred
+// create syncs (see CreateGame.jsx / lib/offlineSync.js) — no server round
+// trip is possible for it yet, so REST/WS are skipped entirely in favor of
+// the locally-saved snapshot.
+const isLocalGameId = (id) => id.startsWith('local-');
 
 // SQLite timestamps are UTC "YYYY-MM-DD HH:MM:SS"
 const formatEntryTime = (value) => {
@@ -16,7 +28,8 @@ export const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const { getGame, updateGameStatus } = useGameAPI();
-  const { joinGame, leaveGame, on, emitScoreChange, requestResync } = useWebSocket();
+  const { joinGame, leaveGame, on, emitScoreChange, requestResync, isConnected } = useGame();
+  const isLocalGame = isLocalGameId(gameId);
   const [players, setPlayers] = useState([]);
   const [gameData, setGameData] = useState(null);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -42,7 +55,46 @@ export const GameBoard = () => {
     return data;
   };
 
+  // A game created offline lives only in localStorage until its deferred
+  // `create-game` op syncs — no REST/WS for it yet.
   useEffect(() => {
+    if (!isLocalGame) return;
+    const snapshot = loadGameSnapshot(gameId);
+    if (!snapshot) {
+      navigate('/'); // nothing to show — nothing was ever saved under this id
+      return;
+    }
+    setGameData(snapshot.game);
+    setPlayers(snapshot.players);
+    setHistoryByPlayer(snapshot.history || {});
+    setLoading(false);
+  }, [gameId, isLocalGame]);
+
+  // Once this device's own deferred create syncs, swap the URL to the real
+  // id — the next mount talks to the server like any other game.
+  useEffect(() => {
+    if (!isLocalGame) return;
+    const onCreated = (e) => {
+      const { localId, game } = e.detail || {};
+      if (localId !== gameId) return;
+      deleteGameSnapshot(gameId);
+      navigate(`/game/${game.id}`, { replace: true });
+    };
+    window.addEventListener('offlinesync:gamecreated', onCreated);
+    return () => window.removeEventListener('offlinesync:gamecreated', onCreated);
+  }, [gameId, isLocalGame, navigate]);
+
+  // Keep a local mirror of whatever's currently on screen — REST/WS state
+  // for a synced game, optimistic local state for one that's not (yet). If
+  // the connection drops mid-session, reloading the tab still shows this
+  // instead of nothing.
+  useEffect(() => {
+    if (!gameData) return;
+    saveGameSnapshot(gameId, { game: gameData, players, history: historyByPlayer });
+  }, [gameId, gameData, players, historyByPlayer]);
+
+  useEffect(() => {
+    if (isLocalGame) return;
     let cancelled = false;
 
     (async () => {
@@ -55,7 +107,19 @@ export const GameBoard = () => {
         }
       } catch (error) {
         console.error('Failed to load game:', error);
-        if (!cancelled) navigate('/');
+        // A network-level failure (no response at all) means we're offline,
+        // not that the game doesn't exist — fall back to the last snapshot
+        // rather than bouncing the user out.
+        const snapshot = !error.response && loadGameSnapshot(gameId);
+        if (cancelled) {
+          // no-op
+        } else if (snapshot) {
+          setGameData(snapshot.game);
+          setPlayers(snapshot.players);
+          setHistoryByPlayer(snapshot.history || {});
+        } else {
+          navigate('/');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -165,19 +229,39 @@ export const GameBoard = () => {
 
     const playerId = selectedPlayer.player_id;
     const requestId = ++scoreRequestIdRef.current;
+    const newScore = Math.max(0, selectedPlayer.current_score + amount);
 
     // Optimistic: instant local feedback. The next `game:state` frame carries
     // the authoritative score + history entry.
     setPlayers((prev) => prev.map((player) =>
-      player.player_id === playerId
-        ? { ...player, current_score: Math.max(0, player.current_score + amount) }
-        : player
+      player.player_id === playerId ? { ...player, current_score: newScore } : player
     ));
     setSelectedPlayer((prev) => (
-      prev && prev.player_id === playerId
-        ? { ...prev, current_score: Math.max(0, prev.current_score + amount) }
-        : prev
+      prev && prev.player_id === playerId ? { ...prev, current_score: newScore } : prev
     ));
+
+    // No connection (or this game hasn't synced at all yet): don't wait on a
+    // WS round trip that can only time out. Queue it — synthesize the same
+    // shape a `game:patch` entry would carry so "Recent entries" isn't blank
+    // until it syncs — and replay it once we're back online (see
+    // GameContext's flushQueue trigger).
+    if (isLocalGame || !isConnected) {
+      const opId = enqueueOp({
+        type: 'score-change',
+        payload: { gameId, playerId, changeAmount: amount },
+      });
+      const entry = {
+        id: opId,
+        change_amount: amount,
+        new_score: newScore,
+        timestamp: new Date().toISOString().replace('T', ' ').replace('Z', ''),
+      };
+      setHistoryByPlayer((prev) => ({
+        ...prev,
+        [playerId]: [entry, ...(prev[playerId] || [])].slice(0, 5),
+      }));
+      return;
+    }
 
     const res = await emitScoreChange(gameId, playerId, amount);
     if (requestId !== scoreRequestIdRef.current) return;
@@ -245,17 +329,29 @@ export const GameBoard = () => {
               {gameData?.name}
             </h1>
             <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span className="font-semibold">Code: {gameData?.code}</span>
-              <button
-                onClick={() => copyText(gameData?.code)}
-                className="font-semibold text-primary hover:text-primary-dark"
-              >
-                Copy
-              </button>
+              <span className="font-semibold">
+                Code: {gameData?.code || 'pending — syncing…'}
+              </span>
+              {gameData?.code && (
+                <button
+                  onClick={() => copyText(gameData?.code)}
+                  className="font-semibold text-primary hover:text-primary-dark"
+                >
+                  Copy
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Offline banner — score changes still work, just queued locally */}
+      {!isConnected && (
+        <div className="px-6 py-2 text-center text-xs font-semibold bg-blue-50 text-blue-700">
+          📡 Offline — changes are saved on this device and will sync once
+          you're back online.
+        </div>
+      )}
 
       {/* Game state banner — shown to everyone */}
       {isLocked && (

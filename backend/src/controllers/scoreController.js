@@ -12,13 +12,14 @@ class ScoreController {
   async updateScore(req, res) {
     try {
       const { gameId, playerId } = req.params;
-      const { changeAmount } = req.body;
+      const { changeAmount, clientOpId } = req.body;
 
       const result = await applyScoreChange(this.db, {
         gameId,
         playerId,
         changeAmount,
         userId: req.userId,
+        clientOpId,
       });
 
       this.onScoreChanged(gameId);

@@ -57,11 +57,12 @@ export const CreateGame = () => {
           time_limit: parsedTimeLimit,
         },
         players: [
-          { player_id: hostId, display_name: hostName, current_score: 0 },
+          { player_id: hostId, display_name: hostName, current_score: 0, is_guest: false },
           ...players.map((playerName) => ({
             player_id: `local-guest-${crypto.randomUUID()}`,
             display_name: playerName,
             current_score: 0,
+            is_guest: true,
           })),
         ],
         history: {},

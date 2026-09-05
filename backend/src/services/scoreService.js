@@ -34,8 +34,10 @@ const mapDbError = (error) => {
   return error;
 };
 
-// Apply a relative change (+/-) to a player's score.
-const applyScoreChange = async (db, { gameId, playerId, changeAmount, userId }) => {
+// Apply a relative change (+/-) to a player's score. `clientOpId`, when
+// present, makes a retried call (e.g. an offline-queued change replayed
+// after a dropped ack) idempotent — see Database.changePlayerScore.
+const applyScoreChange = async (db, { gameId, playerId, changeAmount, userId, clientOpId }) => {
   if (typeof changeAmount !== 'number' || Number.isNaN(changeAmount)) {
     throw new ScoreError('changeAmount must be a number', 400);
   }
@@ -45,7 +47,7 @@ const applyScoreChange = async (db, { gameId, playerId, changeAmount, userId }) 
   assertCanEdit(game, playerId, userId);
 
   try {
-    return await db.changePlayerScore(gameId, playerId, changeAmount, userId);
+    return await db.changePlayerScore(gameId, playerId, changeAmount, userId, clientOpId);
   } catch (error) {
     throw mapDbError(error);
   }

@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameAPI } from '../hooks/useGame';
+import { useGame } from '../context/GameContext';
 import { copyText } from '../lib/clipboard';
+import { saveGameSnapshot, enqueueOp } from '../lib/offlineSync';
 
 export const CreateGame = () => {
   const navigate = useNavigate();
   const { createGame } = useGameAPI();
+  const { isConnected } = useGame();
   const [name, setName] = useState('');
   const [playerInput, setPlayerInput] = useState('');
   const [players, setPlayers] = useState([]);
@@ -29,6 +32,45 @@ export const CreateGame = () => {
   const handleCreateGame = async () => {
     if (!name.trim()) {
       alert('Please enter a game name');
+      return;
+    }
+
+    // No connection: create it locally and defer the real POST until we're
+    // back online (see GameContext's flushQueue). There's no server yet to
+    // hand out a code, so skip straight to the game screen instead of the
+    // code-reveal step — GameBoard shows "pending" there until it syncs.
+    if (!isConnected) {
+      const localId = `local-${crypto.randomUUID()}`;
+      const hostId = localStorage.getItem('userId');
+      const hostName = localStorage.getItem('username') || 'You';
+      const parsedTarget = targetScore ? parseInt(targetScore) : null;
+      const parsedTimeLimit = timeLimit ? parseInt(timeLimit) : null;
+
+      saveGameSnapshot(localId, {
+        game: {
+          id: localId,
+          code: null,
+          name,
+          host_id: hostId,
+          status: 'active',
+          target_score: parsedTarget,
+          time_limit: parsedTimeLimit,
+        },
+        players: [
+          { player_id: hostId, display_name: hostName, current_score: 0 },
+          ...players.map((playerName) => ({
+            player_id: `local-guest-${crypto.randomUUID()}`,
+            display_name: playerName,
+            current_score: 0,
+          })),
+        ],
+        history: {},
+      });
+      enqueueOp({
+        type: 'create-game',
+        payload: { localId, name, players, targetScore: parsedTarget, timeLimit: parsedTimeLimit },
+      });
+      navigate(`/game/${localId}`);
       return;
     }
 
@@ -107,6 +149,13 @@ export const CreateGame = () => {
       <div className="max-w-md mx-auto">
         <h1 className="text-4xl font-bold mb-2">Create Scoreboard</h1>
         <p className="text-gray-600 mb-8">SETUP NEW GAME</p>
+
+        {!isConnected && (
+          <div className="mb-6 px-4 py-3 rounded-xl text-sm font-semibold bg-blue-50 text-blue-700">
+            📡 Offline — this game will be created on this device now and
+            sync automatically once you're back online.
+          </div>
+        )}
 
         {/* Scoreboard Name */}
         <div className="mb-8">

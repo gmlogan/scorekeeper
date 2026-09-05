@@ -165,6 +165,20 @@ class Database {
       `);
       console.log('DB migration v5 applied (game_players.display_name_override added)');
     }
+
+    if (version < 6) {
+      // v6: client_op_id lets an offline-queued score change be replayed
+      // safely after reconnecting. SQLite unique indexes treat every NULL as
+      // distinct, so normal (non-queued) writes — which pass no op id — are
+      // never affected by the constraint.
+      await this._exec(`
+        ALTER TABLE score_history ADD COLUMN client_op_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_score_history_client_op
+          ON score_history(game_id, client_op_id);
+        PRAGMA user_version=6;
+      `);
+      console.log('DB migration v6 applied (score_history.client_op_id added)');
+    }
   }
 
   // User operations
@@ -451,28 +465,62 @@ class Database {
     );
   }
 
-  changePlayerScore(gameId, playerId, changeAmount, editedByUserId) {
+  // `clientOpId`, when present, makes this call idempotent: replaying a
+  // change with the same id (an offline-queued score change retried after a
+  // dropped ack) returns the original result instead of applying it twice.
+  // The lookup + apply happen inside the same per-(game,player) serialized
+  // mutation so a genuine concurrent retry can't race past the check.
+  getScoreHistoryByClientOp(gameId, clientOpId) {
+    if (!clientOpId) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        'SELECT * FROM score_history WHERE game_id = ? AND client_op_id = ?',
+        [gameId, clientOpId],
+        (err, row) => (err ? reject(err) : resolve(row || null))
+      );
+    });
+  }
+
+  scoreResultFromHistoryRow(row) {
+    return {
+      previousScore: row.previous_score,
+      newScore: row.new_score,
+      entry: {
+        id: row.id,
+        change_amount: row.change_amount,
+        new_score: row.new_score,
+        timestamp: row.timestamp,
+      },
+    };
+  }
+
+  changePlayerScore(gameId, playerId, changeAmount, editedByUserId, clientOpId = null) {
     return this.enqueueScoreMutation(gameId, playerId, () =>
-      new Promise((resolve, reject) => {
-        this.db.get(
-          'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
-          [gameId, playerId],
-          (err, row) => {
-            if (err) return reject(err);
-            if (!row) return reject(new Error('Player not in game'));
+      this.getScoreHistoryByClientOp(gameId, clientOpId).then((existing) => {
+        if (existing) return this.scoreResultFromHistoryRow(existing);
 
-            const newScore = row.current_score + changeAmount;
-            if (newScore < 0) return reject(new Error('Score cannot be negative'));
+        return new Promise((resolve, reject) => {
+          this.db.get(
+            'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
+            [gameId, playerId],
+            (err, row) => {
+              if (err) return reject(err);
+              if (!row) return reject(new Error('Player not in game'));
 
-            this.updatePlayerScoreNow(
-              gameId,
-              playerId,
-              newScore,
-              changeAmount,
-              editedByUserId
-            ).then(resolve, reject);
-          }
-        );
+              const newScore = row.current_score + changeAmount;
+              if (newScore < 0) return reject(new Error('Score cannot be negative'));
+
+              this.updatePlayerScoreNow(
+                gameId,
+                playerId,
+                newScore,
+                changeAmount,
+                editedByUserId,
+                clientOpId
+              ).then(resolve, reject);
+            }
+          );
+        });
       })
     );
   }
@@ -512,7 +560,7 @@ class Database {
     return current;
   }
 
-  updatePlayerScoreNow(gameId, playerId, newScore, changeAmount, editedByUserId) {
+  updatePlayerScoreNow(gameId, playerId, newScore, changeAmount, editedByUserId, clientOpId = null) {
     return new Promise((resolve, reject) => {
       this.db.get(
         'SELECT current_score FROM game_players WHERE game_id = ? AND player_id = ?',
@@ -536,9 +584,9 @@ class Database {
               const entryId = uuidv4();
               const timestamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
               this.db.run(
-                `INSERT INTO score_history (id, game_id, player_id, previous_score, new_score, change_amount, edited_by_id, timestamp)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [entryId, gameId, playerId, previousScore, newScore, changeAmount, editedByUserId, timestamp],
+                `INSERT INTO score_history (id, game_id, player_id, previous_score, new_score, change_amount, edited_by_id, client_op_id, timestamp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [entryId, gameId, playerId, previousScore, newScore, changeAmount, editedByUserId, clientOpId, timestamp],
                 (historyErr) => {
                   if (historyErr) reject(historyErr);
                   else resolve({

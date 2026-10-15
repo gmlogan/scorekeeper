@@ -44,8 +44,10 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 EXPOSE 5000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+# busybox wget, not `node -e`: booting a second Node process per check hit the
+# old 3s timeout on a low-power host (ZimaOS). 127.0.0.1 avoids localhost -> ::1.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:${PORT:-5000}/health || exit 1
 
 # Start server
 CMD ["node", "src/server.js"]

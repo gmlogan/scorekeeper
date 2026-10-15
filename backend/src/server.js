@@ -32,7 +32,18 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(helmet());
+// helmet's default CSP includes `upgrade-insecure-requests`, which makes the
+// browser rewrite the app's own /assets/*.js requests to https:// when the
+// page is served over plain http on a LAN IP (e.g. `docker run -p 5000:5000`
+// on a home server) — they fail and the page renders blank. Dropped; TLS is
+// the reverse proxy's job and its https pages don't need the upgrade anyway.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'upgrade-insecure-requests': null },
+    },
+  })
+);
 // FRONTEND_URL unset (dev, or same-origin prod deploys where the backend
 // serves the built frontend) means there's no separate origin to restrict to.
 app.use(cors(process.env.FRONTEND_URL ? { origin: process.env.FRONTEND_URL } : {}));

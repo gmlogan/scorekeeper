@@ -3,6 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
+// Version `schema.sql` produces on its own. Bump together with every new
+// migration in `_migrate()` (and keep schema.sql in step with it).
+const SCHEMA_VERSION = 6;
+
 class Database {
   constructor() {
     this.dbPath = path.join(__dirname, '..', '..', 'database', 'scorekeeper.db');
@@ -35,6 +39,10 @@ class Database {
         try {
           await this._exec('PRAGMA foreign_keys = ON');
 
+          const fresh = !(await this._get(
+            "SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name='users'"
+          ));
+
           // Schema statements are all "CREATE ... IF NOT EXISTS" — safe to run
           // on every start.
           const schemaPath = path.join(this.dbDir, 'schema.sql');
@@ -44,7 +52,11 @@ class Database {
             console.warn('No schema.sql found, skipping schema init');
           }
 
-          await this._migrate();
+          // schema.sql already builds the latest shape, so a brand-new DB
+          // must skip the migrations (v1 etc. expect the old columns and
+          // would fail). Only pre-existing DBs are migrated forward.
+          if (fresh) await this._exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+          else await this._migrate();
 
           console.log('Connected to database at:', this.dbPath);
           resolve();

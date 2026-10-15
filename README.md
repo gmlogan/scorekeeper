@@ -72,7 +72,7 @@ Open http://localhost:5000 in your browser.
 ```bash
 cd backend
 npm install
-npm run init-db  # Initialize SQLite database
+npm run init-db  # Optional: create/migrate the SQLite database (also happens on server start)
 npm run dev      # Start development server (port 5000)
 ```
 
@@ -172,6 +172,10 @@ scorekeeper/
 
 ## 🗄️ Database Schema
 
+> Changing the schema? Add a migration to `_migrate()` **and** update
+> `schema.sql` and `SCHEMA_VERSION` in `backend/src/models/database.js` — fresh
+> databases get `schema.sql` as-is, existing ones get the migration.
+
 ### Users
 - `id` - Unique identifier
 - `username` - Unique username
@@ -245,8 +249,11 @@ the code straight from GitHub (`https://github.com/gmlogan/scorekeeper`).
 A single container. The multi-stage `Dockerfile` builds the React frontend, then
 the Node/Express backend serves **both** the API and the built frontend on one
 port (`5000`). The SQLite schema is applied automatically on every start
-(`CREATE TABLE IF NOT EXISTS ...`), so there is no separate DB-init step. The
-database file is kept on the host via a bind mount so it survives rebuilds.
+(`CREATE TABLE IF NOT EXISTS ...`), and forward-only migrations
+(`_migrate()` in `backend/src/models/database.js`, gated on `PRAGMA user_version`)
+upgrade older databases automatically, so there is no separate DB-init or
+migration step. A brand-new database is created at the latest schema version and
+skips the migrations. The database file is kept on the host via a bind mount so it survives rebuilds.
 
 ### 1. Install prerequisites on the host
 
